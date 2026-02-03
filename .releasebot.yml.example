@@ -1,0 +1,51 @@
+# Example .releasebot.yml for releasebot (copy to .releasebot.yml and adjust)
+#
+# releasebot run --prev-tag v1.0.0
+# Optional: set OPENAI_API_KEY for LLM-generated changelog; otherwise uses a simple template.
+
+# Previous release tag (can also be passed as --prev-tag)
+previous_release_tag: v1.0.0
+
+# Justfile: run these recipes in order before generating the changelog.
+# Requires the `just` binary on PATH.
+justfile:
+  targets:
+    - test
+    - build
+  working_dir: .  # optional; default is repo root
+
+# Changelog output and format
+changelog:
+  output: CHANGELOG-new.md
+  # Format template for each entry (used as guidance for the LLM or for simple mode).
+  # Example: "- {{.Title}} (#{{.Number}}) by @{{.Author}}"
+  format: "- {{.Title}} (#{{.Number}}) by @{{.Author}}"
+  # Or use a file:
+  # format_file: .changelog-format.txt
+  # LLM: use OpenAI, Ollama, or Anthropic to generate the changelog section (optional)
+  llm:
+    provider: ollama
+    model: qwen3:4b   # or e.g. llama3.2 for Ollama; gpt-4o-mini for OpenAI; claude-sonnet-4-5-20250929 for Anthropic
+    # base_url: http://localhost:11434   # optional for Ollama (or set OLLAMA_HOST); optional for Anthropic
+    # summarize_per_pr: true   # per-PR LLM outputs JSON: change_type, description, pr_id
+    # include_diff: false       # when true, pass PR diff to LLM (expensive)
+    # cache_llm_summaries: true # cache per-PR JSON (default on when summarize_per_pr)
+  # Changelog writer template (Go text/template) when using summarize_per_pr:
+  # .Version, .RepoURL, .Sections["Added"], .Sections["Fixed"], etc.; each entry has .Description, .PRID, .URL
+  # template_file: .releasebot/changelog-template.tmpl
+  # Or inline (multiline YAML with |):
+  # template: |
+  #   ## {{.Version}}
+  #   {{range $section := .SectionOrder}}{{if index $.Sections $section}}
+  #   ### {{$section}}
+  #   {{range index $.Sections $section}}
+  #   - {{.Description}} [#{{.PRID}}]({{.URL}})
+  #   {{end}}{{end}}{{end}}
+
+# GitHub: when enabled, fetch merged PRs between prev tag and head instead of using git log
+github:
+  enabled: true
+  # token: set via GITHUB_TOKEN env or here
+  # owner and repo: optional; default from git remote origin
+  # owner: myorg
+  # repo: myrepo

@@ -1,0 +1,4 @@
+releasebot
+
+# PR cache (avoids re-fetching from GitHub)
+.releasebot/

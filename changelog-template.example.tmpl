@@ -1,0 +1,7 @@
+## {{.Version}}
+{{range $section := .SectionOrder}}{{if index $.Sections $section}}
+### {{$section}}
+{{range index $.Sections $section}}
+- {{.Description}} [#{{.PRID}}]({{.URL}})
+{{end}}
+{{end}}{{end}}
