@@ -1,7 +1,6 @@
 package cache
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,7 +8,7 @@ import (
 )
 
 // LLMSummaryCache stores and loads cached per-PR LLM summary strings.
-// Key is (owner, repo, prNumber, withDiff) so toggling include_diff invalidates.
+// The cached value is the raw LLM response (already JSON). Key is (owner, repo, prNumber, withDiff) so toggling include_diff invalidates.
 type LLMSummaryCache struct {
 	Dir string
 }
@@ -35,37 +34,24 @@ func llmKey(owner, repo string, prNumber int, withDiff bool) string {
 	return fmt.Sprintf("%s_%s_%d_%s.json", safe(owner), safe(repo), prNumber, suffix)
 }
 
-// entry holds the cached summary (allows adding metadata later).
-type llmCacheEntry struct {
-	Summary string `json:"summary"`
-}
-
 // Get returns the cached summary for this PR and mode (meta-only vs with-diff). Returns ("", false) on miss.
+// The returned string is the raw LLM JSON (e.g. {"change_type":"Added","description":"...","pr_id":12345}).
 func (c *LLMSummaryCache) Get(owner, repo string, prNumber int, withDiff bool) (string, bool) {
 	path := filepath.Join(c.Dir, llmKey(owner, repo, prNumber, withDiff))
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return "", false
 	}
-	var e llmCacheEntry
-	if err := json.Unmarshal(data, &e); err != nil {
-		return "", false
-	}
-	return e.Summary, true
+	return strings.TrimSpace(string(data)), true
 }
 
-// Set writes the summary for this PR and mode.
+// Set writes the summary for this PR and mode. summary is the raw LLM JSON; it is stored as-is with no wrapper.
 func (c *LLMSummaryCache) Set(owner, repo string, prNumber int, withDiff bool, summary string) error {
 	if err := os.MkdirAll(c.Dir, 0755); err != nil {
 		return fmt.Errorf("create llm cache dir: %w", err)
 	}
 	path := filepath.Join(c.Dir, llmKey(owner, repo, prNumber, withDiff))
-	e := llmCacheEntry{Summary: summary}
-	data, err := json.MarshalIndent(e, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal llm cache: %w", err)
-	}
-	if err := os.WriteFile(path, data, 0644); err != nil {
+	if err := os.WriteFile(path, []byte(summary), 0644); err != nil {
 		return fmt.Errorf("write llm cache: %w", err)
 	}
 	return nil
