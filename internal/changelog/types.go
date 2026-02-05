@@ -52,7 +52,6 @@ func ParsePRChangeJSON(raw string, prID int) (*PRChange, error) {
 		raw = strings.TrimSuffix(raw, "```")
 		raw = strings.TrimSpace(raw)
 	}
-	fmt.Println("raw", raw)
 	var c PRChange
 	if err := json.Unmarshal([]byte(raw), &c); err != nil {
 		return nil, fmt.Errorf("parse PR change JSON: %w", err)

@@ -1,12 +1,10 @@
 package changelog
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"os"
 	"strings"
-	"text/template"
 
 	"github.com/johnewart/releasebot/internal/cache"
 	"github.com/johnewart/releasebot/internal/git"
@@ -30,20 +28,25 @@ type GenerateOptions struct {
 	LLMModel     string
 	LLMBaseURL   string
 	ExistingHead string
-	// Per-PR summarization: call LLM once per PR and optionally cache.
+	// Per-PR summarization: when true, analyze each PR independently with the LLM (one call per PR → JSON),
+	// then build the final changelog from that JSON (template). Reduces context/scope per call. When false,
+	// feed the LLM all PRs at once in a single call (may take longer but more contextually relevant).
 	SummarizePerPR     bool
 	IncludeDiff        bool // when true, pass PR diff to LLM (only when SummarizePerPR)
 	CacheLLMSummaries  bool // when true, use LLMSummaryCacheDir to cache per-PR summaries
 	LLMSummaryCacheDir string
 	Owner              string
 	Repo               string
-	// ChangelogWriterTemplate is the Go text/template for the final section when using summarize_per_pr (grouped by change_type).
+	// ChangelogWriterTemplate (or Format) is the structure/instructions for the final changelog when using summarize_per_pr.
+	// The LLM receives the summarized records (not raw PRs/diffs) and this template to produce the section.
 	ChangelogWriterTemplate string
 	RepoURL                 string // e.g. https://github.com/owner/repo for PR links
 }
 
 // Generate writes a new changelog section. If UseLLM is true, uses the LLM; otherwise formats entries with the template.
-// When SummarizePerPR is true, each PR is summarized by the LLM individually (with optional diff and caching).
+// When SummarizePerPR is true: each PR is analyzed independently (LLM → JSON, cached); then the LLM is called
+// once with those summarized records (description, pr_id, change_type) to generate the changelog. When false:
+// all raw PRs are fed to the LLM in one call to generate the changelog.
 func Generate(ctx context.Context, opts GenerateOptions) (string, error) {
 	var section string
 	if opts.UseLLM && opts.SummarizePerPR && len(opts.Source.PRs) > 0 {
@@ -79,7 +82,11 @@ func Generate(ctx context.Context, opts GenerateOptions) (string, error) {
 			if err != nil {
 				return "", fmt.Errorf("llm: %w", err)
 			}
-			section, err = llm.GenerateChangelogSection(ctx, opts.Version, opts.Format, entries)
+			structure := opts.ChangelogWriterTemplate
+			if structure == "" {
+				structure = opts.Format
+			}
+			section, err = llm.GenerateChangelogSection(ctx, opts.Version, structure, entries)
 			if err != nil {
 				return "", fmt.Errorf("generate section: %w", err)
 			}
@@ -104,7 +111,8 @@ func Generate(ctx context.Context, opts GenerateOptions) (string, error) {
 	return full, nil
 }
 
-// generateSectionPerPR runs the LLM once per PR for structured JSON (change_type, description, pr_id), then runs the changelog writer template.
+// generateSectionPerPR analyzes each PR independently (LLM → JSON per PR, cached to file), then calls the LLM
+// once with those summarized records (description, pr_id, change_type) to generate the final changelog—not raw PRs or diffs.
 func generateSectionPerPR(ctx context.Context, opts GenerateOptions) (string, error) {
 	llm, err := NewLLM(opts.LLMProvider, opts.LLMModel, opts.LLMBaseURL)
 	if err != nil {
@@ -143,32 +151,37 @@ func generateSectionPerPR(ctx context.Context, opts GenerateOptions) (string, er
 		changes = append(changes, c)
 	}
 
-	return renderChangelogWriter(opts.Version, opts.RepoURL, opts.ChangelogWriterTemplate, changes)
+	// Pass summarized records (not raw PRs/diffs) to the LLM to generate the changelog section.
+	entries := formatSummarizedChanges(opts.RepoURL, changes)
+	structure := opts.ChangelogWriterTemplate
+	if structure == "" {
+		structure = opts.Format
+	}
+	section, err := llm.GenerateChangelogSection(ctx, opts.Version, structure, entries)
+	if err != nil {
+		return "", fmt.Errorf("generate changelog from summaries: %w", err)
+	}
+	return section, nil
 }
 
-// renderChangelogWriter groups changes by change_type and executes the Go template.
-func renderChangelogWriter(version, repoURL, tmplContent string, changes []*PRChange) (string, error) {
-	sections := make(map[string][]TemplateEntry)
+// formatSummarizedChanges returns a string representation of per-PR summaries for the LLM to turn into a changelog section.
+func formatSummarizedChanges(repoURL string, changes []*PRChange) string {
+	sections := make(map[string][]*PRChange)
 	for _, c := range changes {
-		url := fmt.Sprintf("%s/pulls/%d", strings.TrimSuffix(repoURL, "/"), c.PRID)
-		entry := TemplateEntry{Description: c.Description, PRID: c.PRID, URL: url}
-		sections[c.ChangeType] = append(sections[c.ChangeType], entry)
+		sections[c.ChangeType] = append(sections[c.ChangeType], c)
 	}
-	data := ChangelogTemplateData{
-		Version:      version,
-		RepoURL:      repoURL,
-		Sections:     sections,
-		SectionOrder: ValidChangeTypes,
+	var b strings.Builder
+	base := strings.TrimSuffix(repoURL, "/")
+	for _, typ := range ValidChangeTypes {
+		if list := sections[typ]; len(list) > 0 {
+			b.WriteString(typ + ":\n")
+			for _, c := range list {
+				b.WriteString(fmt.Sprintf("  - %s (#%d %s/pulls/%d)\n", c.Description, c.PRID, base, c.PRID))
+			}
+			b.WriteString("\n")
+		}
 	}
-	tmpl, err := template.New("changelog").Parse(tmplContent)
-	if err != nil {
-		return "", fmt.Errorf("parse changelog template: %w", err)
-	}
-	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, data); err != nil {
-		return "", fmt.Errorf("execute changelog template: %w", err)
-	}
-	return buf.String(), nil
+	return strings.TrimSpace(b.String())
 }
 
 func formatSectionSimple(version, format string, src Source) string {

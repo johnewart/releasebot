@@ -29,6 +29,7 @@ func init() {
 	rootCmd.AddCommand(runCmd)
 	runCmd.Flags().StringVar(&prevTag, "prev-tag", "", "previous release tag (overrides config)")
 	runCmd.Flags().StringVar(&headRef, "head", "HEAD", "head ref for changelog range (default: HEAD)")
+	runCmd.Flags().IntVar(&prLimit, "limit", 0, "max number of PRs to include in changelog (0 = no limit)")
 }
 
 func runRun(cmd *cobra.Command, args []string) error {
@@ -113,6 +114,10 @@ func runRun(cmd *cobra.Command, args []string) error {
 		if prs, ok := prCache.Get(owner, repo, prev, headRef); ok {
 			src.PRs = prs
 			fmt.Fprintf(os.Stderr, "✓ Using %d merged PR(s) from cache (between %s and %s)\n", len(prs), prev, headRef)
+			if prLimit > 0 && len(src.PRs) > prLimit {
+				src.PRs = src.PRs[:prLimit]
+				fmt.Fprintf(os.Stderr, "✓ Limiting to %d PR(s) (--limit)\n", prLimit)
+			}
 		} else {
 			token := cfg.GitHub.Token
 			if token == "" {
@@ -128,6 +133,10 @@ func runRun(cmd *cobra.Command, args []string) error {
 			}
 			src.PRs = prs
 			fmt.Fprintf(os.Stderr, "✓ Found %d merged PR(s) between %s and %s (cached)\n", len(prs), prev, headRef)
+		}
+		if prLimit > 0 && len(src.PRs) > prLimit {
+			src.PRs = src.PRs[:prLimit]
+			fmt.Fprintf(os.Stderr, "✓ Limiting to %d PR(s) (--limit)\n", prLimit)
 		}
 	} else {
 		commits, err := git.LogBetween(ctx, repoAbs, prev, headRef)
@@ -167,7 +176,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 		opts.Repo = repo
 		opts.RepoURL = fmt.Sprintf("https://github.com/%s/%s", owner, repo)
 	}
-	if summarizePerPR {
+	if useLLM || summarizePerPR {
 		tmpl, err := cfg.ChangelogTemplate(repoAbs)
 		if err != nil {
 			return fmt.Errorf("changelog template: %w", err)

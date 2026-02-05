@@ -27,7 +27,7 @@ changelog:
     provider: ollama
     model: qwen3:4b   # or e.g. llama3.2 for Ollama; gpt-4o-mini for OpenAI; claude-sonnet-4-5-20250929 for Anthropic
     # base_url: http://localhost:11434   # optional for Ollama (or set OLLAMA_HOST); optional for Anthropic
-    # summarize_per_pr: true   # per-PR LLM outputs JSON: change_type, description, pr_id
+    # summarize_per_pr: true   # analyze each PR independently (LLM→JSON per PR), then build changelog from JSON; if false, LLM gets all PRs at once
     # include_diff: false       # when true, pass PR diff to LLM (expensive)
     # cache_llm_summaries: true # cache per-PR JSON (default on when summarize_per_pr)
   # Changelog writer template (Go text/template) when using summarize_per_pr:

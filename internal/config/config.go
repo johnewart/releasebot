@@ -56,7 +56,8 @@ type LLMConfig struct {
 	Model string `yaml:"model"`
 	// BaseURL overrides the API base URL (optional for OpenAI; for Ollama default is http://localhost:11434/v1).
 	BaseURL string `yaml:"base_url"`
-	// SummarizePerPR: when true, call the LLM once per PR to determine what changed; results are optionally cached.
+	// SummarizePerPR: when true, analyze each PR independently (LLM → JSON per PR), then build the final
+	// changelog from that JSON. When false, feed the LLM all PRs at once (single call; more context, may be slower).
 	SummarizePerPR bool `yaml:"summarize_per_pr"`
 	// IncludeDiff: when SummarizePerPR is true, pass the PR diff to the LLM (in addition to title/body). Expensive and token-heavy.
 	IncludeDiff bool `yaml:"include_diff"`
@@ -145,7 +146,7 @@ func (c *Config) ChangelogTemplate(repoRoot string) (string, error) {
 	return defaultChangelogTemplate, nil
 }
 
-// defaultChangelogTemplate is used when no template is configured. .Sections is map[string][]TemplateEntry; each has .Description, .PRID, .URL.
+// defaultChangelogTemplate is used as the structure/format passed to the LLM when generating the changelog from summarized records (describe version heading, sections by change type, and entry format).
 const defaultChangelogTemplate = `## {{.Version}}
 {{range $section := .SectionOrder}}{{if index $.Sections $section}}
 ### {{$section}}

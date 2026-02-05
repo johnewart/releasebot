@@ -12,6 +12,7 @@ var (
 	repoPath string
 	prevTag  string
 	headRef  string
+	prLimit  int
 )
 
 var rootCmd = &cobra.Command{

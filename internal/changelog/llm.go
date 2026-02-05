@@ -2,11 +2,14 @@ package changelog
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	anthropicoption "github.com/anthropics/anthropic-sdk-go/option"
@@ -24,10 +27,68 @@ const (
 	defaultOllamaModel    = "llama3.2"
 	defaultOpenAIModel    = "gpt-4o-mini"
 	defaultAnthropicModel = "claude-sonnet-4-5-20250929"
+
+	maxLLMRetries  = 3
+	initialBackoff = 1 * time.Second
+	maxBackoff     = 30 * time.Second
 )
 
+// isRecoverableError reports whether the error is transient and worth retrying (e.g. 5xx, 429, timeout).
+func isRecoverableError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var openaiErr *openai.Error
+	if errors.As(err, &openaiErr) {
+		return statusCodeRetryable(openaiErr.StatusCode)
+	}
+	var anthropicErr *anthropic.Error
+	if errors.As(err, &anthropicErr) {
+		return statusCodeRetryable(anthropicErr.StatusCode)
+	}
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) {
+		return isRecoverableError(urlErr.Err)
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return netErr.Timeout() || netErr.Temporary()
+	}
+	return false
+}
+
+func statusCodeRetryable(code int) bool {
+	return code == http.StatusTooManyRequests || (code >= 500 && code < 600)
+}
+
+// retryWithBackoff runs fn up to maxAttempts times with exponential backoff on recoverable errors.
+func retryWithBackoff(ctx context.Context, maxAttempts int, fn func() (string, error)) (string, error) {
+	var lastErr error
+	backoff := initialBackoff
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		out, err := fn()
+		if err == nil {
+			return out, nil
+		}
+		lastErr = err
+		if !isRecoverableError(err) || attempt == maxAttempts-1 {
+			return "", err
+		}
+		if ctx.Err() != nil {
+			return "", ctx.Err()
+		}
+		time.Sleep(backoff)
+		backoff *= 2
+		if backoff > maxBackoff {
+			backoff = maxBackoff
+		}
+	}
+	return "", lastErr
+}
+
 // Generator produces a changelog section from version, format, and entries.
-// When summarize_per_pr is enabled, SummarizePR is called once per PR (result can be cached as JSON).
+// When summarize_per_pr is on: SummarizePR is called once per PR (result cached as JSON); the final
+// changelog is built from that JSON (template). When off: GenerateChangelogSection is called once with all PRs.
 type Generator interface {
 	GenerateChangelogSection(ctx context.Context, version, format string, entries interface{}) (string, error)
 	// SummarizePR returns structured change info (change_type, description, pr_id) as JSON; parse with ParsePRChangeJSON.
@@ -101,17 +162,23 @@ func (o *ollamaGenerator) GenerateChangelogSection(ctx context.Context, version,
 		System: system,
 		Stream: &stream,
 	}
-	var full strings.Builder
-	err := o.client.Generate(ctx, req, func(resp api.GenerateResponse) error {
-		full.WriteString(resp.Response)
-		return nil
+	out, err := retryWithBackoff(ctx, maxLLMRetries, func() (string, error) {
+		var full strings.Builder
+		err := o.client.Generate(ctx, req, func(resp api.GenerateResponse) error {
+			full.WriteString(resp.Response)
+			return nil
+		})
+		if err != nil {
+			return "", fmt.Errorf("ollama generate: %w", err)
+		}
+		s := strings.TrimSpace(full.String())
+		if s == "" {
+			return "", fmt.Errorf("ollama returned empty response")
+		}
+		return s, nil
 	})
 	if err != nil {
-		return "", fmt.Errorf("ollama generate: %w", err)
-	}
-	out := strings.TrimSpace(full.String())
-	if out == "" {
-		return "", fmt.Errorf("ollama returned empty response")
+		return "", err
 	}
 	return out, nil
 }
@@ -126,15 +193,17 @@ func (o *ollamaGenerator) SummarizePR(ctx context.Context, metadata, diff string
 		System: system,
 		Stream: &stream,
 	}
-	var full strings.Builder
-	err := o.client.Generate(ctx, req, func(resp api.GenerateResponse) error {
-		full.WriteString(resp.Response)
-		return nil
+	return retryWithBackoff(ctx, maxLLMRetries, func() (string, error) {
+		var full strings.Builder
+		err := o.client.Generate(ctx, req, func(resp api.GenerateResponse) error {
+			full.WriteString(resp.Response)
+			return nil
+		})
+		if err != nil {
+			return "", fmt.Errorf("ollama summarize PR: %w", err)
+		}
+		return strings.TrimSpace(full.String()), nil
 	})
-	if err != nil {
-		return "", fmt.Errorf("ollama summarize PR: %w", err)
-	}
-	return strings.TrimSpace(full.String()), nil
 }
 
 // newAnthropicGenerator uses the Anthropic Messages API (anthropic-sdk-go).
@@ -162,34 +231,42 @@ type anthropicGenerator struct {
 func (a *anthropicGenerator) GenerateChangelogSection(ctx context.Context, version, format string, entries interface{}) (string, error) {
 	prompt := buildPrompt(version, format, entries)
 	system := "You are a release notes writer. Output only the requested changelog section in valid Markdown. Do not add extra commentary or headers other than the version heading."
-	msg, err := a.client.Messages.New(ctx, anthropic.MessageNewParams{
-		Model:     anthropic.Model(a.model),
-		MaxTokens: 4096,
-		System:    []anthropic.TextBlockParam{{Text: system}},
-		Messages:  []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock(prompt))},
+	out, err := retryWithBackoff(ctx, maxLLMRetries, func() (string, error) {
+		msg, err := a.client.Messages.New(ctx, anthropic.MessageNewParams{
+			Model:     anthropic.Model(a.model),
+			MaxTokens: 4096,
+			System:    []anthropic.TextBlockParam{{Text: system}},
+			Messages:  []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock(prompt))},
+		})
+		if err != nil {
+			return "", fmt.Errorf("anthropic messages: %w", err)
+		}
+		s := extractAnthropicText(msg.Content)
+		if s == "" {
+			return "", fmt.Errorf("anthropic returned empty response")
+		}
+		return s, nil
 	})
 	if err != nil {
-		return "", fmt.Errorf("anthropic messages: %w", err)
-	}
-	out := extractAnthropicText(msg.Content)
-	if out == "" {
-		return "", fmt.Errorf("anthropic returned empty response")
+		return "", err
 	}
 	return out, nil
 }
 
 func (a *anthropicGenerator) SummarizePR(ctx context.Context, metadata, diff string, prID int) (string, error) {
 	prompt := buildSummarizePRPrompt(metadata, diff, prID)
-	msg, err := a.client.Messages.New(ctx, anthropic.MessageNewParams{
-		Model:     anthropic.Model(a.model),
-		MaxTokens: 1024,
-		System:    []anthropic.TextBlockParam{{Text: summarizePRSystemPrompt}},
-		Messages:  []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock(prompt))},
+	return retryWithBackoff(ctx, maxLLMRetries, func() (string, error) {
+		msg, err := a.client.Messages.New(ctx, anthropic.MessageNewParams{
+			Model:     anthropic.Model(a.model),
+			MaxTokens: 1024,
+			System:    []anthropic.TextBlockParam{{Text: summarizePRSystemPrompt}},
+			Messages:  []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock(prompt))},
+		})
+		if err != nil {
+			return "", fmt.Errorf("anthropic summarize PR: %w", err)
+		}
+		return strings.TrimSpace(extractAnthropicText(msg.Content)), nil
 	})
-	if err != nil {
-		return "", fmt.Errorf("anthropic summarize PR: %w", err)
-	}
-	return strings.TrimSpace(extractAnthropicText(msg.Content)), nil
 }
 
 // extractAnthropicText concatenates text from all text content blocks in the message.
@@ -227,43 +304,51 @@ func newOpenAIGenerator(model, baseURL string) (*LLM, error) {
 // GenerateChangelogSection implements Generator for OpenAI.
 func (l *LLM) GenerateChangelogSection(ctx context.Context, version, format string, entries interface{}) (string, error) {
 	prompt := buildPrompt(version, format, entries)
-	resp, err := l.client.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{
-		Model: openai.F(openai.ChatModel(l.model)),
-		Messages: openai.F([]openai.ChatCompletionMessageParamUnion{
-			openai.SystemMessage("You are a release notes writer. Output only the requested changelog section in valid Markdown. Do not add extra commentary or headers other than the version heading."),
-			openai.UserMessage(prompt),
-		}),
+	out, err := retryWithBackoff(ctx, maxLLMRetries, func() (string, error) {
+		resp, err := l.client.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{
+			Model: openai.F(openai.ChatModel(l.model)),
+			Messages: openai.F([]openai.ChatCompletionMessageParamUnion{
+				openai.SystemMessage("You are a release notes writer. Output only the requested changelog section in valid Markdown. Do not add extra commentary or headers other than the version heading."),
+				openai.UserMessage(prompt),
+			}),
+		})
+		if err != nil {
+			return "", fmt.Errorf("chat completion: %w", err)
+		}
+		if len(resp.Choices) == 0 {
+			return "", fmt.Errorf("no choices in response")
+		}
+		content := resp.Choices[0].Message.Content
+		if content == "" {
+			return "", fmt.Errorf("empty content")
+		}
+		return content, nil
 	})
 	if err != nil {
-		return "", fmt.Errorf("chat completion: %w", err)
+		return "", err
 	}
-	if len(resp.Choices) == 0 {
-		return "", fmt.Errorf("no choices in response")
-	}
-	content := resp.Choices[0].Message.Content
-	if content == "" {
-		return "", fmt.Errorf("empty content")
-	}
-	return content, nil
+	return out, nil
 }
 
 func (l *LLM) SummarizePR(ctx context.Context, metadata, diff string, prID int) (string, error) {
 	prompt := buildSummarizePRPrompt(metadata, diff, prID)
-	resp, err := l.client.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{
-		Model: openai.F(openai.ChatModel(l.model)),
-		Messages: openai.F([]openai.ChatCompletionMessageParamUnion{
-			openai.SystemMessage(summarizePRSystemPrompt),
-			openai.UserMessage(prompt),
-		}),
+	return retryWithBackoff(ctx, maxLLMRetries, func() (string, error) {
+		resp, err := l.client.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{
+			Model: openai.F(openai.ChatModel(l.model)),
+			Messages: openai.F([]openai.ChatCompletionMessageParamUnion{
+				openai.SystemMessage(summarizePRSystemPrompt),
+				openai.UserMessage(prompt),
+			}),
+		})
+		if err != nil {
+			return "", fmt.Errorf("summarize PR: %w", err)
+		}
+		if len(resp.Choices) == 0 {
+			return "", fmt.Errorf("no choices in response")
+		}
+		content := strings.TrimSpace(resp.Choices[0].Message.Content)
+		return content, nil
 	})
-	if err != nil {
-		return "", fmt.Errorf("summarize PR: %w", err)
-	}
-	if len(resp.Choices) == 0 {
-		return "", fmt.Errorf("no choices in response")
-	}
-	content := strings.TrimSpace(resp.Choices[0].Message.Content)
-	return content, nil
 }
 
 const summarizePRSystemPrompt = `You are a release notes classifier. Output only valid JSON, no other text.
@@ -307,11 +392,13 @@ func buildPrompt(version, format string, entries interface{}) string {
 	}
 	return fmt.Sprintf(`Generate a changelog section for version %s.
 
-Use this format for each entry (you can vary slightly for readability):
+Use the following template as the structure for your output, not an exact template; if the template has 
+an <instructions> tag, follow the instructions in the tag as instructions for that specific template.
+
+Structure template:
 %s
 
 Input data to turn into changelog entries:
 %s
-
-Output only the Markdown for this version section (e.g. "## v1.2.3" followed by the entries).`, version, format, body)
+`, version, format, body)
 }
