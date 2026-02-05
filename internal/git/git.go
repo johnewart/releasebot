@@ -87,6 +87,26 @@ func RemoteOriginURL(ctx context.Context, repoPath string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
+// ListTags returns all tag names in the repository (refs/tags/* stripped to tag name).
+func ListTags(ctx context.Context, repoPath string) ([]string, error) {
+	cmd := exec.CommandContext(ctx, "git", "tag", "-l")
+	cmd.Dir = repoPath
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("git tag: %w", err)
+	}
+	if len(out) == 0 {
+		return nil, nil
+	}
+	var tags []string
+	for _, line := range strings.Split(strings.TrimSuffix(string(out), "\n"), "\n") {
+		if t := strings.TrimSpace(line); t != "" {
+			tags = append(tags, t)
+		}
+	}
+	return tags, nil
+}
+
 // ParseGitHubOwnerRepo extracts owner and repo from a git remote URL.
 // Supports https://github.com/owner/repo[.git] and git@github.com:owner/repo[.git].
 func ParseGitHubOwnerRepo(remoteURL string) (owner, repo string, err error) {
