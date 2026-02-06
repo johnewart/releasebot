@@ -17,8 +17,8 @@ var (
 
 var pypiCmd = &cobra.Command{
 	Use:   "pypi",
-	Short: "Check or wait for a Python package on PyPI",
-	Long:  `Validate that a package (e.g. my-package or my-package==1.0.0) exists on PyPI, or wait until it becomes available.`,
+	Short: "Check or watch for a Python package on PyPI",
+	Long:  `Validate that a package (e.g. my-package or my-package==1.0.0) exists on PyPI, or watch until it becomes available.`,
 }
 
 var pypiCheckCmd = &cobra.Command{
@@ -29,21 +29,21 @@ var pypiCheckCmd = &cobra.Command{
 	RunE:  runPypiCheck,
 }
 
-var pypiWaitCmd = &cobra.Command{
-	Use:   "wait <package> [version]",
-	Short: "Wait for a package to appear on PyPI",
+var pypiWatchCmd = &cobra.Command{
+	Use:   "watch <package> [version]",
+	Short: "Watch until a package appears on PyPI",
 	Long:  `Polls PyPI until the package (and optional version) exists or the timeout is reached. Useful after publishing from CI.`,
 	Args:  cobra.RangeArgs(1, 2),
-	RunE:  runPypiWait,
+	RunE:  runPypiWatch,
 }
 
 func init() {
 	rootCmd.AddCommand(pypiCmd)
 	pypiCmd.AddCommand(pypiCheckCmd)
-	pypiCmd.AddCommand(pypiWaitCmd)
+	pypiCmd.AddCommand(pypiWatchCmd)
 
-	pypiWaitCmd.Flags().DurationVar(&pypiWaitTimeout, "timeout", 5*time.Minute, "maximum time to wait")
-	pypiWaitCmd.Flags().DurationVar(&pypiWaitInterval, "interval", 5*time.Second, "poll interval")
+	pypiWatchCmd.Flags().DurationVar(&pypiWaitTimeout, "timeout", 5*time.Minute, "maximum time to watch")
+	pypiWatchCmd.Flags().DurationVar(&pypiWaitInterval, "interval", 5*time.Second, "poll interval")
 }
 
 func runPypiCheck(cmd *cobra.Command, args []string) error {
@@ -81,13 +81,13 @@ func runPypiCheck(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func runPypiWait(cmd *cobra.Command, args []string) error {
+func runPypiWatch(cmd *cobra.Command, args []string) error {
 	if dryRun {
 		ref := args[0]
 		if len(args) == 2 {
 			ref = args[0] + "==" + args[1]
 		}
-		fmt.Fprintf(os.Stderr, "[dry-run] Would wait for package %s on PyPI (timeout %s)\n", ref, pypiWaitTimeout)
+		fmt.Fprintf(os.Stderr, "[dry-run] Would watch for package %s on PyPI (timeout %s)\n", ref, pypiWaitTimeout)
 		return nil
 	}
 	ctx := context.Background()

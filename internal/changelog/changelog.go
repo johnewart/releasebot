@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/johnewart/releasebot/internal/cache"
@@ -41,8 +42,10 @@ type GenerateOptions struct {
 	// The LLM receives the summarized records (not raw PRs/diffs) and this template to produce the section.
 	ChangelogWriterTemplate string
 	RepoURL                 string // e.g. https://github.com/owner/repo for PR links
-	// ReportLLMProgress, when non-nil, is called with progress messages during LLM work (e.g. "Summarizing PR 3/12", "Generating changelog section...").
+	// ReportLLMProgress, when non-nil, is called with progress messages during LLM work (e.g. "Generating changelog section...").
 	ReportLLMProgress func(message string)
+	// ReportLLMProgressBar, when non-nil, is called with (current, total) during per-PR summarization for a progress bar instead of per-PR text.
+	ReportLLMProgressBar func(current, total int)
 }
 
 // Generate writes a new changelog section. If UseLLM is true, uses the LLM; otherwise formats entries with the template.
@@ -81,7 +84,11 @@ func Generate(ctx context.Context, opts GenerateOptions) (string, error) {
 
 		if opts.UseLLM {
 			if opts.ReportLLMProgress != nil {
-				opts.ReportLLMProgress("Generating changelog section...")
+				changelogName := filepath.Base(opts.OutputPath)
+				if changelogName == "" {
+					changelogName = "CHANGELOG.md"
+				}
+				opts.ReportLLMProgress(fmt.Sprintf("Combining changelog entries to create the new %s...", changelogName))
 			}
 			llm, err := NewLLM(opts.LLMProvider, opts.LLMModel, opts.LLMBaseURL)
 			if err != nil {
@@ -119,6 +126,9 @@ func Generate(ctx context.Context, opts GenerateOptions) (string, error) {
 // generateSectionPerPR analyzes each PR independently (LLM → JSON per PR, cached to file), then calls the LLM
 // once with those summarized records (description, pr_id, change_type) to generate the final changelog—not raw PRs or diffs.
 func generateSectionPerPR(ctx context.Context, opts GenerateOptions) (string, error) {
+	if opts.ReportLLMProgress != nil {
+		opts.ReportLLMProgress("Generating summaries...")
+	}
 	llm, err := NewLLM(opts.LLMProvider, opts.LLMModel, opts.LLMBaseURL)
 	if err != nil {
 		return "", fmt.Errorf("llm: %w", err)
@@ -132,7 +142,9 @@ func generateSectionPerPR(ctx context.Context, opts GenerateOptions) (string, er
 	var changes []*PRChange
 	total := len(opts.Source.PRs)
 	for i, pr := range opts.Source.PRs {
-		if opts.ReportLLMProgress != nil {
+		if opts.ReportLLMProgressBar != nil {
+			opts.ReportLLMProgressBar(i+1, total)
+		} else if opts.ReportLLMProgress != nil {
 			opts.ReportLLMProgress(fmt.Sprintf("Summarizing PR %d/%d", i+1, total))
 		}
 		metadata := fmt.Sprintf("Title: %s\nAuthor: @%s\nMerged: %s\n\nDescription:\n%s", pr.Title, pr.Author, pr.MergedAt, pr.Body)
@@ -162,7 +174,11 @@ func generateSectionPerPR(ctx context.Context, opts GenerateOptions) (string, er
 
 	// Pass summarized records (not raw PRs/diffs) to the LLM to generate the changelog section.
 	if opts.ReportLLMProgress != nil {
-		opts.ReportLLMProgress("Generating changelog section...")
+		changelogName := filepath.Base(opts.OutputPath)
+		if changelogName == "" {
+			changelogName = "CHANGELOG.md"
+		}
+		opts.ReportLLMProgress(fmt.Sprintf("Combining changelog entries to create the new %s...", changelogName))
 	}
 	entries := formatSummarizedChanges(opts.RepoURL, changes)
 	structure := opts.ChangelogWriterTemplate

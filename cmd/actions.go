@@ -23,9 +23,9 @@ var (
 
 var actionsCmd = &cobra.Command{
 	Use:   "actions",
-	Short: "List, wait for, and show status of GitHub Actions for a tag",
+	Short: "List, watch, and show status of GitHub Actions for a tag",
 	Long: `List workflow runs triggered for a specific tag (e.g. after pushing a release tag),
-wait until all runs complete, or show a brief status summary. Requires GitHub config
+watch until all runs complete, or show a brief status summary. Requires GitHub config
 or GITHUB_TOKEN and a repo with remote origin.`,
 }
 
@@ -43,11 +43,11 @@ var actionsStatusCmd = &cobra.Command{
 	RunE:  runActionsStatus,
 }
 
-var actionsWaitCmd = &cobra.Command{
-	Use:   "wait",
-	Short: "Wait for all workflow runs for a tag to complete",
+var actionsWatchCmd = &cobra.Command{
+	Use:   "watch",
+	Short: "Watch until all workflow runs for a tag complete",
 	Long:  `Poll until every workflow run for the tag has completed, then print final status. Exits 0 if all succeeded, 1 if any failed or timed out.`,
-	RunE:  runActionsWait,
+	RunE:  runActionsWatch,
 }
 
 var actionsWorkflowsCmd = &cobra.Command{
@@ -59,13 +59,13 @@ var actionsWorkflowsCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(actionsCmd)
-	actionsCmd.AddCommand(actionsListCmd, actionsStatusCmd, actionsWaitCmd, actionsWorkflowsCmd)
+	actionsCmd.AddCommand(actionsListCmd, actionsStatusCmd, actionsWatchCmd, actionsWorkflowsCmd)
 
-	actionsCmd.PersistentFlags().StringVar(&actionsTag, "tag", "", "git tag to list/wait for (e.g. v1.0.0); required")
+	actionsCmd.PersistentFlags().StringVar(&actionsTag, "tag", "", "git tag to list/watch (e.g. v1.0.0); required")
 
-	actionsWaitCmd.Flags().DurationVar(&actionsWaitTimeout, "timeout", 30*time.Minute, "maximum time to wait for runs to complete")
-	actionsWaitCmd.Flags().DurationVar(&actionsPollInterval, "poll-interval", 15*time.Second, "interval between status checks")
-	actionsWaitCmd.Flags().BoolVar(&actionsWaitAll, "all", false, "wait for all workflow runs for the tag; if false, wait only for workflows that run on tag push (from .github/workflows)")
+	actionsWatchCmd.Flags().DurationVar(&actionsWaitTimeout, "timeout", 30*time.Minute, "maximum time to watch for runs to complete")
+	actionsWatchCmd.Flags().DurationVar(&actionsPollInterval, "poll-interval", 15*time.Second, "interval between status checks")
+	actionsWatchCmd.Flags().BoolVar(&actionsWaitAll, "all", false, "watch all workflow runs for the tag; if false, watch only workflows that run on tag push (from .github/workflows)")
 }
 
 func actionsClientAndSHA(ctx context.Context) (*github.Client, string, error) {
@@ -234,9 +234,9 @@ func runActionsStatus(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func runActionsWait(cmd *cobra.Command, args []string) error {
+func runActionsWatch(cmd *cobra.Command, args []string) error {
 	if dryRun {
-		fmt.Fprintf(os.Stderr, "[dry-run] Would wait for workflow runs for tag %s (timeout %s)\n", actionsTag, actionsWaitTimeout)
+		fmt.Fprintf(os.Stderr, "[dry-run] Would watch for workflow runs for tag %s (timeout %s)\n", actionsTag, actionsWaitTimeout)
 		return nil
 	}
 	ctx := context.Background()

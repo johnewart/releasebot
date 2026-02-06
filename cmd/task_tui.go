@@ -12,23 +12,28 @@ import (
 // taskTUI is a generic step-based TUI with optional status log and progress bar.
 // The worker sends: taskStatusMsg, taskProgressMsg, taskStepResultMsg, taskDoneMsg.
 type taskTUI struct {
-	title       string
-	stepNames   []string
-	ch          chan interface{}
-	status      []string // "pending" | "running" | "done" | "skipped" | "error"
-	current     int
-	spinner     spinner.Model
-	done        bool
-	finalErr    error
-	statusLog   []string
-	progressCur int
-	progressTot int
-	progressBar progress.Model
-	planLines   []string // when set (e.g. dry-run), View shows plan instead of steps
+	title         string
+	stepNames     []string
+	ch            chan interface{}
+	status        []string // "pending" | "running" | "done" | "skipped" | "error"
+	current       int
+	spinner       spinner.Model
+	done          bool
+	finalErr      error
+	statusLog     []string
+	progressCur   int
+	progressTot   int
+	progressLabel string // e.g. "Fetching PRs" or "Summarizing PRs"
+	progressBar   progress.Model
+	planLines     []string // when set (e.g. dry-run), View shows plan instead of steps
 }
 
 type taskStatusMsg struct{ Line string }
-type taskProgressMsg struct{ Current, Total int }
+type taskProgressMsg struct {
+	Current int
+	Total   int
+	Label   string // optional, e.g. "Summarizing PRs"; empty => "Fetching PRs"
+}
 type taskStepResultMsg struct {
 	Step    int
 	Err     error
@@ -81,6 +86,9 @@ func (m *taskTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case taskProgressMsg:
 		m.progressCur = msg.Current
 		m.progressTot = msg.Total
+		if msg.Label != "" {
+			m.progressLabel = msg.Label
+		}
 		return m, tea.Batch(m.spinner.Tick, m.waitCh())
 	case taskStepResultMsg:
 		if msg.Skipped {
@@ -93,6 +101,7 @@ func (m *taskTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.statusLog = nil
 		m.progressCur, m.progressTot = 0, 0
+		m.progressLabel = ""
 		next := msg.Step + 1
 		if next < len(m.stepNames) && m.status[next] == "pending" {
 			m.status[next] = "running"
@@ -177,7 +186,11 @@ func (m *taskTUI) View() string {
 			}
 			if m.progressTot > 0 {
 				pct := float64(m.progressCur) / float64(m.progressTot)
-				s += "     " + m.progressBar.ViewAs(pct) + " Fetching PRs " + fmt.Sprintf("%d/%d", m.progressCur, m.progressTot) + "\n"
+				label := m.progressLabel
+				if label == "" {
+					label = "Fetching PRs"
+				}
+				s += "     " + m.progressBar.ViewAs(pct) + " " + label + " " + fmt.Sprintf("%d/%d", m.progressCur, m.progressTot) + "\n"
 			} else if len(m.statusLog) == 0 {
 				s += "     " + m.spinner.View() + " ...\n"
 			}

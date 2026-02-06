@@ -121,16 +121,13 @@ func (c *Client) MergedPRsBetween(ctx context.Context, base, head string) ([]Pul
 // MergedPRsBetweenWithProgress does MergedPRsBetween and calls report with status messages.
 // When reportProgress is non-nil, it is called with (current, total) in the PR-fetch loop instead of per-commit status lines.
 func (c *Client) MergedPRsBetweenWithProgress(ctx context.Context, base, head string, report func(string), reportProgress func(current, total int)) ([]PullRequest, error) {
-	if report != nil {
-		report("Listing commits between " + base + " and " + head + "...")
-	}
 	commits, err := c.ListCommitsBetween(ctx, base, head)
 	if err != nil {
 		return nil, err
 	}
 	nCommits := len(commits)
-	if report != nil {
-		report("Found " + strconv.Itoa(nCommits) + " commits. Querying GitHub for merged PRs...")
+	if report != nil && nCommits > 0 {
+		report("Fetching PRs from GitHub...")
 	}
 	seen := make(map[int]struct{})
 	var result []PullRequest
@@ -152,9 +149,6 @@ func (c *Client) MergedPRsBetweenWithProgress(ctx context.Context, base, head st
 			seen[pr.Number] = struct{}{}
 			result = append(result, pr)
 		}
-	}
-	if report != nil {
-		report("Found " + strconv.Itoa(len(result)) + " merged PRs")
 	}
 	return result, nil
 }

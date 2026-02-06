@@ -14,6 +14,7 @@ import (
 	"github.com/johnewart/releasebot/internal/github"
 	"github.com/johnewart/releasebot/internal/just"
 	"github.com/johnewart/releasebot/internal/semver"
+	"github.com/johnewart/releasebot/internal/slack"
 	"github.com/spf13/cobra"
 )
 
@@ -84,7 +85,9 @@ func runRun(cmd *cobra.Command, args []string) error {
 	}
 
 	if isTerminal(os.Stdout) && !noTUI {
-		return runRunTUI(ctx, cfg, repoAbs, prev, headRef, outPath, version, prLimit, dryRun)
+		err := runRunTUI(ctx, cfg, repoAbs, prev, headRef, outPath, version, prLimit, dryRun)
+		notifySlackRun(cfg, err == nil, err, dryRun, outPath)
+		return err
 	}
 
 	fmt.Fprintf(os.Stderr, "✓ Previous tag %s validated\n", prev)
@@ -100,10 +103,13 @@ func runRun(cmd *cobra.Command, args []string) error {
 			}
 			result, err := just.Runner(workDir, cfg.Justfile.Targets)
 			if err != nil {
+				notifySlackRun(cfg, false, err, false, "")
 				return fmt.Errorf("just: %w", err)
 			}
 			if !result.Success() {
-				return fmt.Errorf("just target(s) failed: %v", result.Failed)
+				err := fmt.Errorf("just target(s) failed: %v", result.Failed)
+				notifySlackRun(cfg, false, err, false, "")
+				return err
 			}
 			fmt.Fprintf(os.Stderr, "✓ Just targets completed: %v\n", cfg.Justfile.Targets)
 		}
@@ -112,6 +118,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 	if dryRun {
 		src, err := gatherChangelogSource(ctx, cfg, repoAbs, prev, headRef, prLimit, nil, nil)
 		if err != nil {
+			notifySlackRun(cfg, false, err, true, "")
 			return err
 		}
 		entries := len(src.PRs)
@@ -123,14 +130,41 @@ func runRun(cmd *cobra.Command, args []string) error {
 			sourceDesc = "PRs"
 		}
 		fmt.Fprintf(os.Stderr, "[dry-run] Would generate changelog and write to %s (%d %s)\n", outPath, entries, sourceDesc)
+		notifySlackRun(cfg, true, nil, true, "")
 		return nil
 	}
 
-	if err := generateChangelogSection(ctx, cfg, repoAbs, prev, headRef, version, outPath, prLimit, nil, nil, nil); err != nil {
+	if err := generateChangelogSection(ctx, cfg, repoAbs, prev, headRef, version, outPath, prLimit, nil, nil, nil, nil); err != nil {
+		notifySlackRun(cfg, false, err, false, "")
 		return err
 	}
 	fmt.Fprintf(os.Stderr, "✓ Changelog written to %s\n", outPath)
+	notifySlackRun(cfg, true, nil, false, outPath)
 	return nil
+}
+
+// notifySlackRun sends a Slack notification when run completes, if webhook_url or SLACK_WEBHOOK_URL is set.
+func notifySlackRun(cfg *config.Config, success bool, runErr error, dryRun bool, outPath string) {
+	webhookURL := ""
+	if cfg != nil && cfg.Slack != nil {
+		webhookURL = cfg.Slack.WebhookURL
+	}
+	if webhookURL == "" && os.Getenv("SLACK_WEBHOOK_URL") == "" {
+		return
+	}
+	var detail string
+	if success {
+		if dryRun {
+			detail = "Dry-run completed."
+		} else if outPath != "" {
+			detail = "Changelog written to " + outPath
+		}
+	} else if runErr != nil {
+		detail = runErr.Error()
+	}
+	if err := slack.NotifyRunComplete(webhookURL, success, detail); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: slack notification: %v\n", err)
+	}
 }
 
 func runRunTUI(ctx context.Context, cfg *config.Config, repoAbs, prev, headRef, outPath, version string, prLimit int, dryRun bool) error {
@@ -196,7 +230,10 @@ func runRunTUI(ctx context.Context, cfg *config.Config, repoAbs, prev, headRef, 
 		report := func(line string) { ch <- taskStatusMsg{Line: line} }
 		reportProgress := func(current, total int) { ch <- taskProgressMsg{Current: current, Total: total} }
 		reportLLM := func(msg string) { ch <- taskStatusMsg{Line: msg} }
-		err := generateChangelogSection(ctx, cfg, repoAbs, prev, headRef, version, outPath, prLimit, report, reportProgress, reportLLM)
+		reportLLMProgressBar := func(current, total int) {
+			ch <- taskProgressMsg{Current: current, Total: total, Label: "Generating summaries"}
+		}
+		err := generateChangelogSection(ctx, cfg, repoAbs, prev, headRef, version, outPath, prLimit, report, reportProgress, reportLLM, reportLLMProgressBar)
 		ch <- taskStepResultMsg{Step: 1, Err: err}
 		ch <- taskDoneMsg{Err: err}
 	})
@@ -205,8 +242,16 @@ func runRunTUI(ctx context.Context, cfg *config.Config, repoAbs, prev, headRef, 
 // generateChangelogSection gathers source (PRs or commits) between prev and headRef, then generates
 // the changelog section with the given version and writes to outPath. Used by run, release, and changelog.
 // When report/reportProgress are non-nil (e.g. from TUI), progress is reported during gather.
-// When reportLLM is non-nil, it is called with progress during LLM work (e.g. "Summarizing PR 3/12").
-func generateChangelogSection(ctx context.Context, cfg *config.Config, repoAbs, prev, headRef, version, outPath string, prLimit int, report func(string), reportProgress func(current, total int), reportLLM func(string)) error {
+// When reportLLM is non-nil, it is called with progress messages (e.g. "Generating changelog section...").
+// When reportLLMProgressBar is non-nil, it is called with (current, total) during per-PR summarization for a progress bar.
+func generateChangelogSection(ctx context.Context, cfg *config.Config, repoAbs, prev, headRef, version, outPath string, prLimit int, report func(string), reportProgress func(current, total int), reportLLM func(string), reportLLMProgressBar func(current, total int)) error {
+	if report != nil {
+		changelogName := filepath.Base(outPath)
+		if changelogName == "" {
+			changelogName = "CHANGELOG.md"
+		}
+		report(fmt.Sprintf("Composing %s for changes between %s and %s...", changelogName, prev, headRef))
+	}
 	format, err := cfg.ChangelogFormat(repoAbs)
 	if err != nil {
 		return err
@@ -289,6 +334,9 @@ func generateChangelogSection(ctx context.Context, cfg *config.Config, repoAbs, 
 	if reportLLM != nil {
 		opts.ReportLLMProgress = reportLLM
 	}
+	if reportLLMProgressBar != nil {
+		opts.ReportLLMProgressBar = reportLLMProgressBar
+	}
 	_, err = changelog.Generate(ctx, opts)
 	return err
 }
@@ -319,12 +367,9 @@ func gatherChangelogSource(ctx context.Context, cfg *config.Config, repoAbs, pre
 				src.PRs = src.PRs[:prLimit]
 			}
 			if report != nil {
-				report("Using " + fmt.Sprintf("%d", len(src.PRs)) + " merged PR(s) from cache")
+				report(fmt.Sprintf("Found %d PRs in that range.", len(src.PRs)))
 			}
 		} else {
-			if report != nil {
-				report("Querying GitHub for merged PRs between " + prev + " and " + headRef + "...")
-			}
 			token := cfg.GitHub.Token
 			if token == "" {
 				token = os.Getenv("GITHUB_TOKEN")
@@ -342,11 +387,14 @@ func gatherChangelogSource(ctx context.Context, cfg *config.Config, repoAbs, pre
 			}
 			_ = prCache.Set(owner, repo, prev, headRef, prs)
 			src.PRs = prs
+			if report != nil {
+				report(fmt.Sprintf("Found %d PRs in that range.", len(src.PRs)))
+			}
 		}
 		if prLimit > 0 && len(src.PRs) > prLimit {
 			src.PRs = src.PRs[:prLimit]
 			if report != nil {
-				report("Limiting to " + fmt.Sprintf("%d", prLimit) + " PR(s)")
+				report(fmt.Sprintf("Limiting to %d PR(s)", prLimit))
 			}
 		}
 	} else {
@@ -359,7 +407,7 @@ func gatherChangelogSource(ctx context.Context, cfg *config.Config, repoAbs, pre
 		}
 		src.Commits = commits
 		if report != nil {
-			report("Found " + fmt.Sprintf("%d", len(commits)) + " commits")
+			report(fmt.Sprintf("Found %d commits in that range.", len(commits)))
 		}
 	}
 	if report == nil {

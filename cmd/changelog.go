@@ -98,7 +98,7 @@ func runChangelog(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	return generateChangelogSection(ctx, cfg, repoAbs, prev, headRef, version, outPath, prLimit, nil, nil, nil)
+	return generateChangelogSection(ctx, cfg, repoAbs, prev, headRef, version, outPath, prLimit, nil, nil, nil, nil)
 }
 
 func runChangelogTUI(ctx context.Context, cfg *config.Config, repoAbs, prev, headRef, version, outPath string, prLimit int, dryRun bool) error {
@@ -137,7 +137,10 @@ func runChangelogTUI(ctx context.Context, cfg *config.Config, repoAbs, prev, hea
 		report := func(line string) { ch <- taskStatusMsg{Line: line} }
 		reportProgress := func(current, total int) { ch <- taskProgressMsg{Current: current, Total: total} }
 		reportLLM := func(msg string) { ch <- taskStatusMsg{Line: msg} }
-		err := generateChangelogSection(ctx, cfg, repoAbs, prev, headRef, version, outPath, prLimit, report, reportProgress, reportLLM)
+		reportLLMProgressBar := func(current, total int) {
+			ch <- taskProgressMsg{Current: current, Total: total, Label: "Generating summaries"}
+		}
+		err := generateChangelogSection(ctx, cfg, repoAbs, prev, headRef, version, outPath, prLimit, report, reportProgress, reportLLM, reportLLMProgressBar)
 		ch <- taskStepResultMsg{Step: 0, Err: err}
 		ch <- taskDoneMsg{Err: err}
 	})

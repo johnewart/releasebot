@@ -22,6 +22,15 @@ type Config struct {
 	PreviousReleaseTag string `yaml:"previous_release_tag"`
 	// Release holds settings for the release command (remote, pypi, docker).
 	Release *ReleaseConfig `yaml:"release"`
+	// Slack holds optional Slack notification (e.g. when run completes).
+	Slack *SlackConfig `yaml:"slack"`
+}
+
+// SlackConfig configures Slack notifications (e.g. on run completion).
+// WebhookURL can be set in config or via SLACK_WEBHOOK_URL env.
+type SlackConfig struct {
+	// WebhookURL is the Slack Incoming Webhook URL. If empty, SLACK_WEBHOOK_URL is used.
+	WebhookURL string `yaml:"webhook_url"`
 }
 
 // ReleaseConfig configures the release command (push remote, and optional PyPI/Docker wait).

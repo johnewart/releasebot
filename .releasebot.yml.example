@@ -50,6 +50,11 @@ github:
   # owner: myorg
   # repo: myrepo
 
+# Slack: optional notification when `releasebot run` completes (success or failure)
+# Set webhook_url here or use SLACK_WEBHOOK_URL env (Incoming Webhook URL from Slack app).
+# slack:
+#   webhook_url: https://hooks.slack.com/services/T.../B.../xxx  # or set SLACK_WEBHOOK_URL
+
 # Release command: optional settings for `releasebot release`
 # release:
 #   remote: origin          # git remote to push to (default: origin)

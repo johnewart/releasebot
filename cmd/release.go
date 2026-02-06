@@ -281,7 +281,7 @@ func doReleaseSteps(params *releaseParams, report releaseReporter) error {
 	}
 
 	// 1. Generate changelog
-	if err := generateChangelogSection(ctx, cfg, repoAbs, params.prev, branch, nextTagForRef, outPathAbs, 0, nil, nil, nil); err != nil {
+	if err := generateChangelogSection(ctx, cfg, repoAbs, params.prev, branch, nextTagForRef, outPathAbs, 0, nil, nil, nil, nil); err != nil {
 		if report != nil {
 			report(1, err, false)
 		}

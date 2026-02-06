@@ -17,8 +17,8 @@ var (
 
 var dockerhubCmd = &cobra.Command{
 	Use:   "dockerhub",
-	Short: "Check or wait for a Docker image on Docker Hub",
-	Long:  `Validate that an image (e.g. myorg/myimage:v1.0 or nginx:latest) exists on Docker Hub, or wait until it becomes available.`,
+	Short: "Check or watch for a Docker image on Docker Hub",
+	Long:  `Validate that an image (e.g. myorg/myimage:v1.0 or nginx:latest) exists on Docker Hub, or watch until it becomes available.`,
 }
 
 var dockerhubCheckCmd = &cobra.Command{
@@ -29,21 +29,21 @@ var dockerhubCheckCmd = &cobra.Command{
 	RunE:  runDockerhubCheck,
 }
 
-var dockerhubWaitCmd = &cobra.Command{
-	Use:   "wait <image>",
-	Short: "Wait for an image to appear on Docker Hub",
+var dockerhubWatchCmd = &cobra.Command{
+	Use:   "watch <image>",
+	Short: "Watch until an image appears on Docker Hub",
 	Long:  `Polls Docker Hub until the image exists or the timeout is reached. Useful after pushing an image from CI.`,
 	Args:  cobra.ExactArgs(1),
-	RunE:  runDockerhubWait,
+	RunE:  runDockerhubWatch,
 }
 
 func init() {
 	rootCmd.AddCommand(dockerhubCmd)
 	dockerhubCmd.AddCommand(dockerhubCheckCmd)
-	dockerhubCmd.AddCommand(dockerhubWaitCmd)
+	dockerhubCmd.AddCommand(dockerhubWatchCmd)
 
-	dockerhubWaitCmd.Flags().DurationVar(&dockerhubWaitTimeout, "timeout", 5*time.Minute, "maximum time to wait")
-	dockerhubWaitCmd.Flags().DurationVar(&dockerhubWaitInterval, "interval", 5*time.Second, "poll interval")
+	dockerhubWatchCmd.Flags().DurationVar(&dockerhubWaitTimeout, "timeout", 5*time.Minute, "maximum time to watch")
+	dockerhubWatchCmd.Flags().DurationVar(&dockerhubWaitInterval, "interval", 5*time.Second, "poll interval")
 }
 
 func runDockerhubCheck(cmd *cobra.Command, args []string) error {
@@ -65,9 +65,9 @@ func runDockerhubCheck(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func runDockerhubWait(cmd *cobra.Command, args []string) error {
+func runDockerhubWatch(cmd *cobra.Command, args []string) error {
 	if dryRun {
-		fmt.Fprintf(os.Stderr, "[dry-run] Would wait for image %s on Docker Hub (timeout %s)\n", args[0], dockerhubWaitTimeout)
+		fmt.Fprintf(os.Stderr, "[dry-run] Would watch for image %s on Docker Hub (timeout %s)\n", args[0], dockerhubWaitTimeout)
 		return nil
 	}
 	ctx := context.Background()
