@@ -47,6 +47,10 @@ func init() {
 }
 
 func runDockerhubCheck(cmd *cobra.Command, args []string) error {
+	if dryRun {
+		fmt.Fprintf(os.Stderr, "[dry-run] Would check if image %s exists on Docker Hub\n", args[0])
+		return nil
+	}
 	ctx := context.Background()
 	image := args[0]
 	ok, err := dockerhub.Check(ctx, image)
@@ -62,6 +66,10 @@ func runDockerhubCheck(cmd *cobra.Command, args []string) error {
 }
 
 func runDockerhubWait(cmd *cobra.Command, args []string) error {
+	if dryRun {
+		fmt.Fprintf(os.Stderr, "[dry-run] Would wait for image %s on Docker Hub (timeout %s)\n", args[0], dockerhubWaitTimeout)
+		return nil
+	}
 	ctx := context.Background()
 	image := args[0]
 	opts := dockerhub.WaitOptions{

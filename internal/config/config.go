@@ -20,6 +20,18 @@ type Config struct {
 	LLM *LLMConfig `yaml:"llm"`
 	// PreviousReleaseTag can be set in config (overridden by --prev-tag).
 	PreviousReleaseTag string `yaml:"previous_release_tag"`
+	// Release holds settings for the release command (remote, pypi, docker).
+	Release *ReleaseConfig `yaml:"release"`
+}
+
+// ReleaseConfig configures the release command (push remote, and optional PyPI/Docker wait).
+type ReleaseConfig struct {
+	// Remote is the git remote to push branch and tags to (default: origin).
+	Remote string `yaml:"remote"`
+	// PyPIPackage is the PyPI package name to check/wait for after release (e.g. my-package). If set, release waits for package==version on PyPI.
+	PyPIPackage string `yaml:"pypi_package"`
+	// DockerImage is the Docker image to check/wait for (e.g. myorg/myimage). If set, release waits for myorg/myimage:tag on Docker Hub.
+	DockerImage string `yaml:"docker_image"`
 }
 
 // JustfileConfig configures execution of justfile recipes.

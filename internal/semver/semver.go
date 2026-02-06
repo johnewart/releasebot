@@ -134,6 +134,60 @@ func (v *Version) NextAlpha(existingANum *int) Version {
 	return Version{Major: base.Major, Minor: base.Minor, Patch: base.Patch, PreKind: "a", PreNum: 0}
 }
 
+// LatestTag returns the latest semantic version tag from the list (by version order).
+// Only tags that parse as semver are considered. Returns empty string if none parse.
+func LatestTag(tags []string) string {
+	var max *Version
+	for _, tagStr := range tags {
+		p := ParseTag(tagStr)
+		if p == nil {
+			continue
+		}
+		v := *p
+		if max == nil || max.Less(&v) {
+			max = &v
+		}
+	}
+	if max == nil {
+		return ""
+	}
+	// Prefer returning the original tag string if it had a 'v' prefix
+	for _, tagStr := range tags {
+		if p := ParseTag(tagStr); p != nil && p.Major == max.Major && p.Minor == max.Minor && p.Patch == max.Patch && p.PreKind == max.PreKind && p.PreNum == max.PreNum {
+			return tagStr
+		}
+	}
+	if max.IsStable() {
+		return max.StringWithV()
+	}
+	return max.String()
+}
+
+// LatestStableTag returns the latest stable (non-alpha, non-rc) semver tag from the list.
+// Use this as the default "previous release" when building changelogs. Returns empty string if no stable tags exist.
+func LatestStableTag(tags []string) string {
+	var max *Version
+	for _, tagStr := range tags {
+		p := ParseTag(tagStr)
+		if p == nil || !p.IsStable() {
+			continue
+		}
+		v := *p
+		if max == nil || max.Less(&v) {
+			max = &v
+		}
+	}
+	if max == nil {
+		return ""
+	}
+	for _, tagStr := range tags {
+		if p := ParseTag(tagStr); p != nil && p.IsStable() && p.Major == max.Major && p.Minor == max.Minor && p.Patch == max.Patch {
+			return tagStr
+		}
+	}
+	return max.StringWithV()
+}
+
 // NextFromTags computes the next version tag from a list of existing tags.
 // If rc is true, returns X.Y.ZrcN (next rc: either X.Y.Zrc0 for next release, or rc(N+1) if X.Y.Zrc* exist).
 // If alpha is true, returns X.Y.ZaN (next alpha, same logic).

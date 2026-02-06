@@ -10,6 +10,7 @@ import (
 var (
 	cfgFile  string
 	repoPath string
+	dryRun   bool
 	prevTag  string
 	headRef  string
 	prLimit  int
@@ -30,6 +31,7 @@ var rootCmd = &cobra.Command{
 func init() {
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", ".releasebot.yml", "path to config file")
 	rootCmd.PersistentFlags().StringVar(&repoPath, "repo", ".", "path to the git repository")
+	rootCmd.PersistentFlags().BoolVar(&dryRun, "dry-run", false, "report what would be done without performing actions")
 }
 
 func Execute() {

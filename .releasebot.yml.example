@@ -49,3 +49,9 @@ github:
   # owner and repo: optional; default from git remote origin
   # owner: myorg
   # repo: myrepo
+
+# Release command: optional settings for `releasebot release`
+# release:
+#   remote: origin          # git remote to push to (default: origin)
+#   pypi_package: my-package  # if set, release waits for package==version on PyPI
+#   docker_image: myorg/myimage  # if set, release waits for image:tag on Docker Hub

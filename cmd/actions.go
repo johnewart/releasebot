@@ -160,6 +160,10 @@ func printWorkflowTree(w *os.File, runs []*github.WorkflowRun, tag string) {
 }
 
 func runActionsList(cmd *cobra.Command, args []string) error {
+	if dryRun {
+		fmt.Fprintf(os.Stderr, "[dry-run] Would list workflow runs for tag %s\n", actionsTag)
+		return nil
+	}
 	ctx := context.Background()
 	client, sha, err := actionsClientAndSHA(ctx)
 	if err != nil {
@@ -181,6 +185,10 @@ func runActionsList(cmd *cobra.Command, args []string) error {
 }
 
 func runActionsStatus(cmd *cobra.Command, args []string) error {
+	if dryRun {
+		fmt.Fprintf(os.Stderr, "[dry-run] Would show status of workflow runs for tag %s\n", actionsTag)
+		return nil
+	}
 	ctx := context.Background()
 	client, sha, err := actionsClientAndSHA(ctx)
 	if err != nil {
@@ -227,6 +235,10 @@ func runActionsStatus(cmd *cobra.Command, args []string) error {
 }
 
 func runActionsWait(cmd *cobra.Command, args []string) error {
+	if dryRun {
+		fmt.Fprintf(os.Stderr, "[dry-run] Would wait for workflow runs for tag %s (timeout %s)\n", actionsTag, actionsWaitTimeout)
+		return nil
+	}
 	ctx := context.Background()
 	client, sha, err := actionsClientAndSHA(ctx)
 	if err != nil {
@@ -313,6 +325,14 @@ func runActionsWait(cmd *cobra.Command, args []string) error {
 }
 
 func runActionsWorkflows(cmd *cobra.Command, args []string) error {
+	if dryRun {
+		if actionsTag != "" {
+			fmt.Fprintf(os.Stderr, "[dry-run] Would list workflows triggered by tag %s\n", actionsTag)
+		} else {
+			fmt.Fprintf(os.Stderr, "[dry-run] Would list workflows that run on tag push\n")
+		}
+		// Still run the local workflow parse so user sees what would be used
+	}
 	repoAbs, err := filepath.Abs(repoPath)
 	if err != nil {
 		return fmt.Errorf("repo path: %w", err)

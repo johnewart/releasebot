@@ -107,6 +107,83 @@ func ListTags(ctx context.Context, repoPath string) ([]string, error) {
 	return tags, nil
 }
 
+// CurrentBranch returns the current branch name (e.g. main). Fails if HEAD is detached.
+func CurrentBranch(ctx context.Context, repoPath string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", "rev-parse", "--abbrev-ref", "HEAD")
+	cmd.Dir = repoPath
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("git rev-parse: %w", err)
+	}
+	name := strings.TrimSpace(string(out))
+	if name == "HEAD" {
+		return "", fmt.Errorf("HEAD is detached; checkout a branch to release")
+	}
+	return name, nil
+}
+
+// RemoteURL returns the fetch URL for the given remote (e.g. origin).
+func RemoteURL(ctx context.Context, repoPath, remote string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", "config", "--get", "remote."+remote+".url")
+	cmd.Dir = repoPath
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("git config remote.%s.url: %w", remote, err)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// Checkout switches to the given branch.
+func Checkout(ctx context.Context, repoPath, branch string) error {
+	cmd := exec.CommandContext(ctx, "git", "checkout", branch)
+	cmd.Dir = repoPath
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git checkout %s: %w (%s)", branch, err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// Add stages paths for commit.
+func Add(ctx context.Context, repoPath string, paths ...string) error {
+	args := append([]string{"add"}, paths...)
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Dir = repoPath
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git add: %w (%s)", err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// CreateCommit creates a commit with the given message.
+func CreateCommit(ctx context.Context, repoPath, message string) error {
+	cmd := exec.CommandContext(ctx, "git", "commit", "-m", message)
+	cmd.Dir = repoPath
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git commit: %w (%s)", err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// CreateTag creates an annotated tag at HEAD. Message is the tag message.
+func CreateTag(ctx context.Context, repoPath, tag, message string) error {
+	cmd := exec.CommandContext(ctx, "git", "tag", "-a", tag, "-m", message)
+	cmd.Dir = repoPath
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git tag: %w (%s)", err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// Push pushes a ref (e.g. refs/heads/main or refs/tags/v1.0.0) to the remote.
+func Push(ctx context.Context, repoPath, remote, ref string) error {
+	cmd := exec.CommandContext(ctx, "git", "push", remote, ref)
+	cmd.Dir = repoPath
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git push %s %s: %w (%s)", remote, ref, err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
 // ParseGitHubOwnerRepo extracts owner and repo from a git remote URL.
 // Supports https://github.com/owner/repo[.git] and git@github.com:owner/repo[.git].
 func ParseGitHubOwnerRepo(remoteURL string) (owner, repo string, err error) {

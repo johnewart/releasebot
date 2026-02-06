@@ -47,6 +47,14 @@ func init() {
 }
 
 func runPypiCheck(cmd *cobra.Command, args []string) error {
+	if dryRun {
+		ref := args[0]
+		if len(args) == 2 {
+			ref = args[0] + "==" + args[1]
+		}
+		fmt.Fprintf(os.Stderr, "[dry-run] Would check if package %s exists on PyPI\n", ref)
+		return nil
+	}
 	ctx := context.Background()
 	name := args[0]
 	version := ""
@@ -74,6 +82,14 @@ func runPypiCheck(cmd *cobra.Command, args []string) error {
 }
 
 func runPypiWait(cmd *cobra.Command, args []string) error {
+	if dryRun {
+		ref := args[0]
+		if len(args) == 2 {
+			ref = args[0] + "==" + args[1]
+		}
+		fmt.Fprintf(os.Stderr, "[dry-run] Would wait for package %s on PyPI (timeout %s)\n", ref, pypiWaitTimeout)
+		return nil
+	}
 	ctx := context.Background()
 	name := args[0]
 	version := ""

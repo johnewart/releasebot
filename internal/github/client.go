@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strconv"
 
 	"github.com/google/go-github/v60/github"
 	"golang.org/x/oauth2"
@@ -102,17 +103,35 @@ func (c *Client) GetPRDiff(ctx context.Context, number int) (string, error) {
 // MergedPRsBetween returns merged PRs that appear in the commit range base..head.
 // It uses CompareCommits then for each commit fetches associated PRs and deduplicates by PR number.
 func (c *Client) MergedPRsBetween(ctx context.Context, base, head string) ([]PullRequest, error) {
+	return c.MergedPRsBetweenWithProgress(ctx, base, head, nil, nil)
+}
+
+// MergedPRsBetweenWithProgress does MergedPRsBetween and calls report with status messages.
+// When reportProgress is non-nil, it is called with (current, total) in the PR-fetch loop instead of per-commit status lines.
+func (c *Client) MergedPRsBetweenWithProgress(ctx context.Context, base, head string, report func(string), reportProgress func(current, total int)) ([]PullRequest, error) {
+	if report != nil {
+		report("Listing commits between " + base + " and " + head + "...")
+	}
 	commits, err := c.ListCommitsBetween(ctx, base, head)
 	if err != nil {
 		return nil, err
 	}
+	nCommits := len(commits)
+	if report != nil {
+		report("Found " + strconv.Itoa(nCommits) + " commits. Querying GitHub for merged PRs...")
+	}
 	seen := make(map[int]struct{})
 	var result []PullRequest
-	for _, commit := range commits {
+	for i, commit := range commits {
+		if reportProgress != nil && nCommits > 0 {
+			reportProgress(i+1, nCommits)
+		} else if report != nil && nCommits > 0 {
+			report("Fetching PRs for commit " + strconv.Itoa(i+1) + "/" + strconv.Itoa(nCommits) + "...")
+		}
 		sha := commit.GetSHA()
 		prs, err := c.PullRequestsForCommit(ctx, sha)
 		if err != nil {
-			continue // skip commits with no PR or API error
+			continue
 		}
 		for _, pr := range prs {
 			if _, ok := seen[pr.Number]; ok {
@@ -121,6 +140,9 @@ func (c *Client) MergedPRsBetween(ctx context.Context, base, head string) ([]Pul
 			seen[pr.Number] = struct{}{}
 			result = append(result, pr)
 		}
+	}
+	if report != nil {
+		report("Found " + strconv.Itoa(len(result)) + " merged PRs")
 	}
 	return result, nil
 }
