@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/bubbles/progress"
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/johnewart/releasebot/internal/sound"
 )
 
 const numReleaseSteps = 7
@@ -197,6 +198,11 @@ func (m *releaseTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
+		if msg.Err != nil {
+			sound.PlayFailure()
+		} else {
+			sound.PlaySuccess()
+		}
 		return m, nil
 	case dryRunStatusMsg:
 		m.dryRunStatusLog = append(m.dryRunStatusLog, msg.Line)
@@ -209,6 +215,11 @@ func (m *releaseTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.done = true
 		m.finalErr = msg.Err
 		m.dryRunLines = msg.Lines
+		if msg.Err != nil {
+			sound.PlayFailure()
+		} else {
+			sound.PlaySuccess()
+		}
 		return m, nil
 	case spinner.TickMsg:
 		var cmd tea.Cmd

@@ -41,6 +41,7 @@ require (
 	github.com/dlclark/regexp2 v1.11.4 // indirect
 	github.com/emirpasic/gods/v2 v2.0.0-alpha // indirect
 	github.com/erikgeiser/coninput v0.0.0-20211004153227-1c3628e74d0f // indirect
+	github.com/faiface/beep v1.1.0 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.3 // indirect
 	github.com/gin-contrib/cors v1.7.2 // indirect
 	github.com/gin-contrib/sse v0.1.0 // indirect
@@ -54,6 +55,7 @@ require (
 	github.com/google/flatbuffers v24.3.25+incompatible // indirect
 	github.com/google/go-querystring v1.1.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
+	github.com/hajimehoshi/oto v0.7.1 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.7 // indirect
@@ -88,13 +90,15 @@ require (
 	golang.org/x/arch v0.8.0 // indirect
 	golang.org/x/crypto v0.43.0 // indirect
 	golang.org/x/exp v0.0.0-20250218142911-aa4b98e5adaa // indirect
-	golang.org/x/image v0.22.0 // indirect
-	golang.org/x/mod v0.30.0 // indirect
+	golang.org/x/exp/shiny v0.0.0-20260112195511-716be5621a96 // indirect
+	golang.org/x/image v0.35.0 // indirect
+	golang.org/x/mobile v0.0.0-20251209145715-2553ed8ce294 // indirect
+	golang.org/x/mod v0.31.0 // indirect
 	golang.org/x/net v0.46.0 // indirect
-	golang.org/x/sync v0.17.0 // indirect
-	golang.org/x/sys v0.38.0 // indirect
+	golang.org/x/sync v0.19.0 // indirect
+	golang.org/x/sys v0.40.0 // indirect
 	golang.org/x/term v0.36.0 // indirect
-	golang.org/x/text v0.30.0 // indirect
+	golang.org/x/text v0.33.0 // indirect
 	golang.org/x/xerrors v0.0.0-20200804184101-5ec99f83aff1 // indirect
 	gonum.org/v1/gonum v0.15.0 // indirect
 	google.golang.org/protobuf v1.34.2 // indirect

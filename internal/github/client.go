@@ -33,13 +33,25 @@ type CompareResponse struct {
 	Commits []*github.RepositoryCommit
 }
 
-// ListCommitsBetween returns commits between base and head (base..head).
+// ListCommitsBetween returns all commits between base and head (base..head).
+// It paginates the GitHub compare API so the full list is returned (not capped at 100).
 func (c *Client) ListCommitsBetween(ctx context.Context, base, head string) ([]*github.RepositoryCommit, error) {
-	comp, _, err := c.Repositories.CompareCommits(ctx, c.Owner, c.Repo, base, head, &github.ListOptions{PerPage: 100})
-	if err != nil {
-		return nil, fmt.Errorf("compare commits: %w", err)
+	const perPage = 100
+	var all []*github.RepositoryCommit
+	page := 1
+	for {
+		comp, _, err := c.Repositories.CompareCommits(ctx, c.Owner, c.Repo, base, head, &github.ListOptions{Page: page, PerPage: perPage})
+		if err != nil {
+			return nil, fmt.Errorf("compare commits: %w", err)
+		}
+		all = append(all, comp.Commits...)
+		total := comp.GetTotalCommits()
+		if total <= len(all) || len(comp.Commits) < perPage {
+			break
+		}
+		page++
 	}
-	return comp.Commits, nil
+	return all, nil
 }
 
 // PullRequest is a minimal PR for changelog (and cache serialization).
