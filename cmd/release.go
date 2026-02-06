@@ -200,8 +200,8 @@ func runRelease(cmd *cobra.Command, args []string) error {
 		releaseDockerTo: releaseDockerWait,
 	}
 
-	// TUI is the default when stdout is a TTY (Bubble Tea renders to stdout); use --no-tui for plain output.
-	if isTerminal(os.Stdout) && !releaseNoTUI {
+	// TUI is the default when stdout is a TTY; use --no-tui (global) or --no-tui (release) for plain output.
+	if isTerminal(os.Stdout) && !noTUI && !releaseNoTUI {
 		return runReleaseTUI(params)
 	}
 
@@ -281,7 +281,7 @@ func doReleaseSteps(params *releaseParams, report releaseReporter) error {
 	}
 
 	// 1. Generate changelog
-	if err := generateChangelogSection(ctx, cfg, repoAbs, params.prev, branch, nextTagForRef, outPathAbs, 0); err != nil {
+	if err := generateChangelogSection(ctx, cfg, repoAbs, params.prev, branch, nextTagForRef, outPathAbs, 0, nil, nil, nil); err != nil {
 		if report != nil {
 			report(1, err, false)
 		}

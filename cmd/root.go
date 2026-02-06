@@ -11,6 +11,7 @@ var (
 	cfgFile  string
 	repoPath string
 	dryRun   bool
+	noTUI    bool
 	prevTag  string
 	headRef  string
 	prLimit  int
@@ -32,6 +33,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", ".releasebot.yml", "path to config file")
 	rootCmd.PersistentFlags().StringVar(&repoPath, "repo", ".", "path to the git repository")
 	rootCmd.PersistentFlags().BoolVar(&dryRun, "dry-run", false, "report what would be done without performing actions")
+	rootCmd.PersistentFlags().BoolVar(&noTUI, "no-tui", false, "disable TUI and use plain stderr output (default: TUI when stdout is a terminal)")
 }
 
 func Execute() {
