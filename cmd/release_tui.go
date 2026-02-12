@@ -12,16 +12,6 @@ import (
 
 const numReleaseSteps = 7
 
-var releaseStepNames = [numReleaseSteps]string{
-	"Just targets",
-	"Generate changelog",
-	"Commit & tag",
-	"Push to remote",
-	"Wait for workflows",
-	"PyPI",
-	"Docker Hub",
-}
-
 // stepResultMsg is sent after each release step completes (from doReleaseSteps reporter).
 type stepResultMsg struct {
 	Step    int
@@ -103,7 +93,7 @@ func (m *releaseTUI) Init() tea.Cmd {
 				}
 				m.ch <- stepResultMsg{Step: step, Err: err}
 			}
-			err := doReleaseSteps(m.params, report)
+			err := doReleaseSteps(m.params, report, nil)
 			m.ch <- releaseDoneMsg{Err: err}
 		}()
 	}
@@ -122,7 +112,8 @@ func (m *releaseTUI) runDryRunGather() {
 	reportProgress := func(current, total int) {
 		m.ch <- dryRunProgressMsg{Current: current, Total: total}
 	}
-	src, err := gatherChangelogSource(ctx, m.params.cfg, m.params.repoAbs, m.params.prev, m.params.branch, 0, report, reportProgress)
+	usePRsRes, useHistoryRes := resolveChangelogSource(m.params.cfg, usePRs, useHistory)
+	src, err := gatherChangelogSource(ctx, m.params.cfg, m.params.repoAbs, m.params.prev, m.params.branch, 0, usePRsRes, useHistoryRes, report, reportProgress)
 	lines := []string{}
 	if err != nil {
 		m.ch <- dryRunPlanMsg{Err: err}

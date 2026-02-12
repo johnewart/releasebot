@@ -82,7 +82,8 @@ func runChangelog(cmd *cobra.Command, args []string) error {
 	}
 
 	if dryRun {
-		src, err := gatherChangelogSource(ctx, cfg, repoAbs, prev, headRef, prLimit, nil, nil)
+		usePRsRes, useHistoryRes := resolveChangelogSource(cfg, usePRs, useHistory)
+		src, err := gatherChangelogSource(ctx, cfg, repoAbs, prev, headRef, prLimit, usePRsRes, useHistoryRes, nil, nil)
 		if err != nil {
 			return err
 		}
@@ -98,7 +99,7 @@ func runChangelog(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	return generateChangelogSection(ctx, cfg, repoAbs, prev, headRef, version, outPath, prLimit, nil, nil, nil, nil)
+	return generateChangelogSection(ctx, cfg, repoAbs, prev, headRef, version, outPath, prLimit, usePRs, useHistory, nil, nil, nil, nil)
 }
 
 func runChangelogTUI(ctx context.Context, cfg *config.Config, repoAbs, prev, headRef, version, outPath string, prLimit int, dryRun bool) error {
@@ -107,7 +108,8 @@ func runChangelogTUI(ctx context.Context, cfg *config.Config, repoAbs, prev, hea
 		return RunTaskTUI(" releasebot  changelog (dry-run) ", steps, func(ch chan<- interface{}) {
 			report := func(line string) { ch <- taskStatusMsg{Line: line} }
 			reportProgress := func(current, total int) { ch <- taskProgressMsg{Current: current, Total: total} }
-			src, err := gatherChangelogSource(ctx, cfg, repoAbs, prev, headRef, prLimit, report, reportProgress)
+			usePRsRes, useHistoryRes := resolveChangelogSource(cfg, usePRs, useHistory)
+			src, err := gatherChangelogSource(ctx, cfg, repoAbs, prev, headRef, prLimit, usePRsRes, useHistoryRes, report, reportProgress)
 			if err != nil {
 				ch <- taskDoneMsg{Err: err}
 				return
@@ -140,7 +142,7 @@ func runChangelogTUI(ctx context.Context, cfg *config.Config, repoAbs, prev, hea
 		reportLLMProgressBar := func(current, total int) {
 			ch <- taskProgressMsg{Current: current, Total: total, Label: "Generating summaries"}
 		}
-		err := generateChangelogSection(ctx, cfg, repoAbs, prev, headRef, version, outPath, prLimit, report, reportProgress, reportLLM, reportLLMProgressBar)
+		err := generateChangelogSection(ctx, cfg, repoAbs, prev, headRef, version, outPath, prLimit, usePRs, useHistory, report, reportProgress, reportLLM, reportLLMProgressBar)
 		ch <- taskStepResultMsg{Step: 0, Err: err}
 		ch <- taskDoneMsg{Err: err}
 	})

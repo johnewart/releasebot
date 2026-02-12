@@ -116,7 +116,8 @@ func runRun(cmd *cobra.Command, args []string) error {
 	}
 
 	if dryRun {
-		src, err := gatherChangelogSource(ctx, cfg, repoAbs, prev, headRef, prLimit, nil, nil)
+		usePRs, useHistory := resolveChangelogSource(cfg, usePRs, useHistory)
+		src, err := gatherChangelogSource(ctx, cfg, repoAbs, prev, headRef, prLimit, usePRs, useHistory, nil, nil)
 		if err != nil {
 			notifySlackRun(cfg, false, err, true, "")
 			return err
@@ -134,7 +135,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	if err := generateChangelogSection(ctx, cfg, repoAbs, prev, headRef, version, outPath, prLimit, nil, nil, nil, nil); err != nil {
+	if err := generateChangelogSection(ctx, cfg, repoAbs, prev, headRef, version, outPath, prLimit, usePRs, useHistory, nil, nil, nil, nil); err != nil {
 		notifySlackRun(cfg, false, err, false, "")
 		return err
 	}
@@ -173,7 +174,8 @@ func runRunTUI(ctx context.Context, cfg *config.Config, repoAbs, prev, headRef, 
 		return RunTaskTUI(" releasebot  run (dry-run) ", steps, func(ch chan<- interface{}) {
 			report := func(line string) { ch <- taskStatusMsg{Line: line} }
 			reportProgress := func(current, total int) { ch <- taskProgressMsg{Current: current, Total: total} }
-			src, err := gatherChangelogSource(ctx, cfg, repoAbs, prev, headRef, prLimit, report, reportProgress)
+			usePRsRes, useHistoryRes := resolveChangelogSource(cfg, usePRs, useHistory)
+			src, err := gatherChangelogSource(ctx, cfg, repoAbs, prev, headRef, prLimit, usePRsRes, useHistoryRes, report, reportProgress)
 			if err != nil {
 				ch <- taskDoneMsg{Err: err}
 				return
@@ -233,7 +235,7 @@ func runRunTUI(ctx context.Context, cfg *config.Config, repoAbs, prev, headRef, 
 		reportLLMProgressBar := func(current, total int) {
 			ch <- taskProgressMsg{Current: current, Total: total, Label: "Generating summaries"}
 		}
-		err := generateChangelogSection(ctx, cfg, repoAbs, prev, headRef, version, outPath, prLimit, report, reportProgress, reportLLM, reportLLMProgressBar)
+		err := generateChangelogSection(ctx, cfg, repoAbs, prev, headRef, version, outPath, prLimit, usePRs, useHistory, report, reportProgress, reportLLM, reportLLMProgressBar)
 		ch <- taskStepResultMsg{Step: 1, Err: err}
 		ch <- taskDoneMsg{Err: err}
 	})
@@ -241,10 +243,11 @@ func runRunTUI(ctx context.Context, cfg *config.Config, repoAbs, prev, headRef, 
 
 // generateChangelogSection gathers source (PRs or commits) between prev and headRef, then generates
 // the changelog section with the given version and writes to outPath. Used by run, release, and changelog.
+// usePRsFlag and useHistoryFlag are the --use-prs and --use-history flag values; config is used when both are false.
 // When report/reportProgress are non-nil (e.g. from TUI), progress is reported during gather.
 // When reportLLM is non-nil, it is called with progress messages (e.g. "Generating changelog section...").
 // When reportLLMProgressBar is non-nil, it is called with (current, total) during per-PR summarization for a progress bar.
-func generateChangelogSection(ctx context.Context, cfg *config.Config, repoAbs, prev, headRef, version, outPath string, prLimit int, report func(string), reportProgress func(current, total int), reportLLM func(string), reportLLMProgressBar func(current, total int)) error {
+func generateChangelogSection(ctx context.Context, cfg *config.Config, repoAbs, prev, headRef, version, outPath string, prLimit int, usePRsFlag, useHistoryFlag bool, report func(string), reportProgress func(current, total int), reportLLM func(string), reportLLMProgressBar func(current, total int)) error {
 	if report != nil {
 		changelogName := filepath.Base(outPath)
 		if changelogName == "" {
@@ -252,12 +255,13 @@ func generateChangelogSection(ctx context.Context, cfg *config.Config, repoAbs, 
 		}
 		report(fmt.Sprintf("Composing %s for changes between %s and %s...", changelogName, prev, headRef))
 	}
+	usePRs, useHistory := resolveChangelogSource(cfg, usePRsFlag, useHistoryFlag)
 	format, err := cfg.ChangelogFormat(repoAbs)
 	if err != nil {
 		return err
 	}
 	var owner, repo string
-	useGitHub := cfg.GitHub != nil && cfg.GitHub.Enabled
+	useGitHub := usePRs && cfg.GitHub != nil && cfg.GitHub.Enabled
 	if useGitHub {
 		owner = cfg.GitHub.Owner
 		repo = cfg.GitHub.Repo
@@ -272,7 +276,7 @@ func generateChangelogSection(ctx context.Context, cfg *config.Config, repoAbs, 
 			}
 		}
 	}
-	src, err := gatherChangelogSource(ctx, cfg, repoAbs, prev, headRef, prLimit, report, reportProgress)
+	src, err := gatherChangelogSource(ctx, cfg, repoAbs, prev, headRef, prLimit, usePRs, useHistory, report, reportProgress)
 	if err != nil {
 		return err
 	}
@@ -341,12 +345,37 @@ func generateChangelogSection(ctx context.Context, cfg *config.Config, repoAbs, 
 	return err
 }
 
+// resolveChangelogSource returns whether to use PRs and/or git history for the changelog.
+// Flags override config. When both would be true, PRs win. When neither is set, default is PRs if github.enabled.
+func resolveChangelogSource(cfg *config.Config, usePRsFlag, useHistoryFlag bool) (usePRs, useHistory bool) {
+	usePRs = usePRsFlag
+	useHistory = useHistoryFlag
+	if !usePRsFlag && !useHistoryFlag {
+		if cfg.Changelog != nil && cfg.Changelog.UsePRs != nil && *cfg.Changelog.UsePRs {
+			usePRs = true
+		}
+		if cfg.Changelog != nil && cfg.Changelog.UseHistory != nil && *cfg.Changelog.UseHistory {
+			useHistory = true
+		}
+	}
+	if usePRs && useHistory {
+		useHistory = false
+	}
+	if !usePRs && !useHistory {
+		usePRs = cfg.GitHub != nil && cfg.GitHub.Enabled
+	}
+	return usePRs, useHistory
+}
+
 // gatherChangelogSource fetches PRs or commits between prev and headRef (no LLM, no writing).
-// If report is non-nil, it is called with progress messages. If reportProgress is non-nil (current, total),
-// it is used during GitHub PR fetch instead of per-commit status lines (e.g. for a progress bar).
-func gatherChangelogSource(ctx context.Context, cfg *config.Config, repoAbs, prev, headRef string, prLimit int, report func(string), reportProgress func(current, total int)) (changelog.Source, error) {
+// usePRs and useHistory come from resolveChangelogSource. If report is non-nil, it is called with progress messages.
+// If reportProgress is non-nil (current, total), it is used during GitHub PR fetch.
+func gatherChangelogSource(ctx context.Context, cfg *config.Config, repoAbs, prev, headRef string, prLimit int, usePRs, useHistory bool, report func(string), reportProgress func(current, total int)) (changelog.Source, error) {
 	var src changelog.Source
-	useGitHub := cfg.GitHub != nil && cfg.GitHub.Enabled
+	useGitHub := usePRs && cfg.GitHub != nil && cfg.GitHub.Enabled
+	if usePRs && (cfg.GitHub == nil || !cfg.GitHub.Enabled) {
+		return src, fmt.Errorf("use_prs or --use-prs requires github.enabled in config")
+	}
 	if useGitHub {
 		owner := cfg.GitHub.Owner
 		repo := cfg.GitHub.Repo

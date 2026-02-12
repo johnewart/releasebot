@@ -55,6 +55,10 @@ type JustfileConfig struct {
 type ChangelogConfig struct {
 	// Output path for the changelog file (default: CHANGELOG.md).
 	Output string `yaml:"output"`
+	// UseHistory, when true, uses git commit history for the changelog instead of PRs. Overridden by --use-history.
+	UseHistory *bool `yaml:"use_history"`
+	// UsePRs, when true, uses merged GitHub PRs for the changelog. Requires github.enabled. Overridden by --use-prs.
+	UsePRs *bool `yaml:"use_prs"`
 	// Format is a template or instructions for how each entry should look (used when not summarize_per_pr).
 	Format string `yaml:"format"`
 	// FormatFile path to a file containing the format template (overrides Format if set).

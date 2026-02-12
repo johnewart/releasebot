@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"os"
@@ -27,6 +28,7 @@ var (
 	releaseMinor       bool
 	releaseMajor       bool
 	releaseNoTUI       bool
+	releaseConfirm     bool
 	releaseWaitTimeout time.Duration
 	releasePyPIWait    time.Duration
 	releaseDockerWait  time.Duration
@@ -40,7 +42,7 @@ from commits/PRs between that tag and the release branch, commits the changelog,
 tag (patch by default; use --release for minor, --major, --rc, --alpha), pushes branch and tags
 to the remote, waits for release workflows to complete, then checks/waits for PyPI and Docker Hub
 if configured. Uses an interactive TUI by default when run in a terminal (use --no-tui for plain
-output). Honors --dry-run.`,
+output). Use --confirm to pause before each step and require approval to continue. Honors --dry-run.`,
 	RunE: runRelease,
 }
 
@@ -54,6 +56,7 @@ func init() {
 	releaseCmd.Flags().BoolVar(&releaseMinor, "release", false, "create new minor version (X.Y+1.0)")
 	releaseCmd.Flags().BoolVar(&releaseMajor, "major", false, "with --release, create new major version (X+1.0.0)")
 	releaseCmd.Flags().BoolVar(&releaseNoTUI, "no-tui", false, "disable TUI and use plain stderr output (default: TUI when in a terminal)")
+	releaseCmd.Flags().BoolVar(&releaseConfirm, "confirm", false, "pause before each step and require Enter to proceed (skips TUI)")
 	releaseCmd.Flags().DurationVar(&releaseWaitTimeout, "workflow-timeout", 30*time.Minute, "max time to wait for release workflows")
 	releaseCmd.Flags().DurationVar(&releasePyPIWait, "pypi-timeout", 10*time.Minute, "max time to wait for PyPI package")
 	releaseCmd.Flags().DurationVar(&releaseDockerWait, "docker-timeout", 10*time.Minute, "max time to wait for Docker image")
@@ -79,6 +82,20 @@ type releaseParams struct {
 // releaseReporter is called after each step (step index, error if any, skipped).
 // If nil, doReleaseSteps prints progress to stderr.
 type releaseReporter func(step int, err error, skipped bool)
+
+// releaseConfirmBeforeStep is called before each step when using --confirm. Return an error to abort.
+type releaseConfirmBeforeStep func(step int, name string) error
+
+// releaseStepNames must match the order of steps in doReleaseSteps.
+var releaseStepNames = []string{
+	"Just targets",
+	"Generate changelog",
+	"Commit & tag",
+	"Push to remote",
+	"Wait for workflows",
+	"PyPI",
+	"Docker Hub",
+}
 
 func runRelease(cmd *cobra.Command, args []string) error {
 	if releaseRC && releaseAlpha {
@@ -200,6 +217,11 @@ func runRelease(cmd *cobra.Command, args []string) error {
 		releaseDockerTo: releaseDockerWait,
 	}
 
+	// --confirm: run without TUI and prompt before each step.
+	if releaseConfirm {
+		return runReleaseConfirm(params)
+	}
+
 	// TUI is the default when stdout is a TTY; use --no-tui (global) or --no-tui (release) for plain output.
 	if isTerminal(os.Stdout) && !noTUI && !releaseNoTUI {
 		return runReleaseTUI(params)
@@ -211,7 +233,8 @@ func runRelease(cmd *cobra.Command, args []string) error {
 		if cfg.Justfile != nil && len(cfg.Justfile.Targets) > 0 {
 			fmt.Fprintf(os.Stderr, "✓ Just targets completed: %v\n", cfg.Justfile.Targets)
 		}
-		src, err := gatherChangelogSource(ctx, cfg, repoAbs, prev, branch, 0, nil, nil)
+		usePRsRes, useHistoryRes := resolveChangelogSource(cfg, usePRs, useHistory)
+		src, err := gatherChangelogSource(ctx, cfg, repoAbs, prev, branch, 0, usePRsRes, useHistoryRes, nil, nil)
 		if err != nil {
 			return fmt.Errorf("dry-run gather: %w", err)
 		}
@@ -235,12 +258,25 @@ func runRelease(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "✓ Release %s complete (dry-run)\n", nextTagForRef)
 		return nil
 	}
-	return doReleaseSteps(params, nil)
+	return doReleaseSteps(params, nil, nil)
+}
+
+// runReleaseConfirm runs the release with a prompt before each step (--confirm). Uses stderr/stdin.
+func runReleaseConfirm(params *releaseParams) error {
+	reader := bufio.NewReader(os.Stdin)
+	confirm := func(step int, name string) error {
+		fmt.Fprintf(os.Stderr, "\nStep %d/%d: %s\n", step+1, len(releaseStepNames), name)
+		fmt.Fprintf(os.Stderr, "  Press Enter to run this step, or Ctrl+C to abort: ")
+		_, err := reader.ReadString('\n')
+		return err
+	}
+	return doReleaseSteps(params, nil, confirm)
 }
 
 // doReleaseSteps runs the 7 release steps. If report is non-nil, it's called after each step (for TUI);
-// if nil, progress is printed to stderr.
-func doReleaseSteps(params *releaseParams, report releaseReporter) error {
+// if nil, progress is printed to stderr. If confirmBeforeStep is non-nil, it is called before each step
+// and returning an error aborts the release.
+func doReleaseSteps(params *releaseParams, report releaseReporter, confirmBeforeStep releaseConfirmBeforeStep) error {
 	ctx := params.ctx
 	repoAbs := params.repoAbs
 	cfg := params.cfg
@@ -251,6 +287,11 @@ func doReleaseSteps(params *releaseParams, report releaseReporter) error {
 	outPath := params.outPath
 
 	// 0. Just targets
+	if confirmBeforeStep != nil {
+		if err := confirmBeforeStep(0, releaseStepNames[0]); err != nil {
+			return fmt.Errorf("aborted at step 1: %w", err)
+		}
+	}
 	hasJust := cfg.Justfile != nil && len(cfg.Justfile.Targets) > 0
 	if hasJust {
 		workDir := repoAbs
@@ -281,7 +322,12 @@ func doReleaseSteps(params *releaseParams, report releaseReporter) error {
 	}
 
 	// 1. Generate changelog
-	if err := generateChangelogSection(ctx, cfg, repoAbs, params.prev, branch, nextTagForRef, outPathAbs, 0, nil, nil, nil, nil); err != nil {
+	if confirmBeforeStep != nil {
+		if err := confirmBeforeStep(1, releaseStepNames[1]); err != nil {
+			return fmt.Errorf("aborted at step 2: %w", err)
+		}
+	}
+	if err := generateChangelogSection(ctx, cfg, repoAbs, params.prev, branch, nextTagForRef, outPathAbs, 0, usePRs, useHistory, nil, nil, nil, nil); err != nil {
 		if report != nil {
 			report(1, err, false)
 		}
@@ -294,6 +340,11 @@ func doReleaseSteps(params *releaseParams, report releaseReporter) error {
 	}
 
 	// 2. Git add, commit, tag
+	if confirmBeforeStep != nil {
+		if err := confirmBeforeStep(2, releaseStepNames[2]); err != nil {
+			return fmt.Errorf("aborted at step 3: %w", err)
+		}
+	}
 	changelogRel, err := filepath.Rel(repoAbs, outPathAbs)
 	if err != nil {
 		changelogRel = outPath
@@ -323,6 +374,11 @@ func doReleaseSteps(params *releaseParams, report releaseReporter) error {
 	}
 
 	// 3. Push branch and tag
+	if confirmBeforeStep != nil {
+		if err := confirmBeforeStep(3, releaseStepNames[3]); err != nil {
+			return fmt.Errorf("aborted at step 4: %w", err)
+		}
+	}
 	if err := git.Push(ctx, repoAbs, remote, "refs/heads/"+branch); err != nil {
 		if report != nil {
 			report(3, err, false)
@@ -343,6 +399,11 @@ func doReleaseSteps(params *releaseParams, report releaseReporter) error {
 	}
 
 	// 4. Wait for release workflows
+	if confirmBeforeStep != nil {
+		if err := confirmBeforeStep(4, releaseStepNames[4]); err != nil {
+			return fmt.Errorf("aborted at step 5: %w", err)
+		}
+	}
 	sha, err := git.RevParse(ctx, repoAbs, nextTagForRef)
 	if err != nil {
 		if report != nil {
@@ -440,6 +501,11 @@ func doReleaseSteps(params *releaseParams, report releaseReporter) error {
 	}
 
 	// 5. PyPI wait
+	if confirmBeforeStep != nil {
+		if err := confirmBeforeStep(5, releaseStepNames[5]); err != nil {
+			return fmt.Errorf("aborted at step 6: %w", err)
+		}
+	}
 	if cfg.Release != nil && cfg.Release.PyPIPackage != "" {
 		pkgVersion := strings.TrimPrefix(nextTagForRef, "v")
 		opts := pypi.WaitOptions{Timeout: params.releasePyPITo, Interval: 5 * time.Second}
@@ -459,6 +525,11 @@ func doReleaseSteps(params *releaseParams, report releaseReporter) error {
 	}
 
 	// 6. Docker Hub wait
+	if confirmBeforeStep != nil {
+		if err := confirmBeforeStep(6, releaseStepNames[6]); err != nil {
+			return fmt.Errorf("aborted at step 7: %w", err)
+		}
+	}
 	if cfg.Release != nil && cfg.Release.DockerImage != "" {
 		imageRef := cfg.Release.DockerImage + ":" + nextTagForRef
 		opts := dockerhub.WaitOptions{Timeout: params.releaseDockerTo, Interval: 5 * time.Second}

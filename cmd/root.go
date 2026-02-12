@@ -8,13 +8,15 @@ import (
 )
 
 var (
-	cfgFile  string
-	repoPath string
-	dryRun   bool
-	noTUI    bool
-	prevTag  string
-	headRef  string
-	prLimit  int
+	cfgFile    string
+	repoPath   string
+	dryRun     bool
+	noTUI      bool
+	prevTag    string
+	headRef    string
+	prLimit    int
+	useHistory bool
+	usePRs     bool
 )
 
 var rootCmd = &cobra.Command{
@@ -34,6 +36,8 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&repoPath, "repo", ".", "path to the git repository")
 	rootCmd.PersistentFlags().BoolVar(&dryRun, "dry-run", false, "report what would be done without performing actions")
 	rootCmd.PersistentFlags().BoolVar(&noTUI, "no-tui", false, "disable TUI and use plain stderr output (default: TUI when stdout is a terminal)")
+	rootCmd.PersistentFlags().BoolVar(&useHistory, "use-history", false, "use git commit history for changelog (overrides config)")
+	rootCmd.PersistentFlags().BoolVar(&usePRs, "use-prs", false, "use merged GitHub PRs for changelog (overrides config; requires github.enabled)")
 }
 
 func Execute() {

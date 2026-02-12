@@ -17,6 +17,9 @@ justfile:
 # Changelog output and format
 changelog:
   output: CHANGELOG-new.md
+  # Source: use_prs (merged GitHub PRs) or use_history (git commit log). When unset, PRs are used if github.enabled.
+  # use_prs: true    # use merged PRs for changelog (requires github.enabled)
+  # use_history: true  # use git commit history instead of PRs
   # Format template for each entry (used as guidance for the LLM or for simple mode).
   # Example: "- {{.Title}} (#{{.Number}}) by @{{.Author}}"
   format: "- {{.Title}} (#{{.Number}}) by @{{.Author}}"
