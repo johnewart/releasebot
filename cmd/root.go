@@ -28,7 +28,9 @@ var rootCmd = &cobra.Command{
   2. Validates the previous release tag in the git repository
   3. Optionally runs justfile recipes (requires 'just' on PATH when using this feature)
   4. Generates or updates CHANGELOG.md using an LLM, with data from GitHub PRs (if configured)
-     or from the git commit log between the previous tag and HEAD`,
+     or from the git commit log between the previous tag and HEAD
+  5. Can run as a GitHub App HTTP server (webhooks + optional user OAuth): releasebot app serve
+  6. Gitflow-like branching: releasebot flow (status, start/finish branches, prune)`,
 }
 
 func init() {

@@ -24,6 +24,9 @@ type Config struct {
 	Release *ReleaseConfig `yaml:"release"`
 	// Slack holds optional Slack notification (e.g. when run completes).
 	Slack *SlackConfig `yaml:"slack"`
+	// Branching configures gitflow-like branches, prune policy, and release cut base.
+	// release_cut_from is required for `flow start release` when --from is not passed (no implicit default in code).
+	Branching *BranchingConfig `yaml:"branching"`
 }
 
 // SlackConfig configures Slack notifications (e.g. on run completion).
@@ -31,6 +34,24 @@ type Config struct {
 type SlackConfig struct {
 	// WebhookURL is the Slack Incoming Webhook URL. If empty, SLACK_WEBHOOK_URL is used.
 	WebhookURL string `yaml:"webhook_url"`
+}
+
+// BranchingConfig configures integration branches, naming prefixes, and optional prune policy.
+type BranchingConfig struct {
+	Main           string       `yaml:"main"`
+	Develop        string       `yaml:"develop"`
+	ReleasePrefix  string       `yaml:"release_prefix"`
+	HotfixPrefix   string       `yaml:"hotfix_prefix"`
+	ReleaseCutFrom string       `yaml:"release_cut_from"`
+	LTSBranches    []string     `yaml:"lts_branches"`
+	Prune          *PruneConfig `yaml:"prune"`
+}
+
+// PruneConfig configures `flow prune` eligibility rules.
+type PruneConfig struct {
+	Remote       string `yaml:"remote"`
+	MaxAgeDays   int    `yaml:"max_age_days"`
+	RetainMinors int    `yaml:"retain_minors"`
 }
 
 // ReleaseConfig configures the release command (push remote, and optional PyPI/Docker wait).
@@ -125,6 +146,59 @@ func (c *Config) Resolve(repoRoot string) {
 	if c.Justfile != nil && c.Justfile.WorkingDir != "" && !filepath.IsAbs(c.Justfile.WorkingDir) {
 		c.Justfile.WorkingDir = filepath.Join(repoRoot, c.Justfile.WorkingDir)
 	}
+	if c.Branching != nil {
+		if c.Branching.Main == "" {
+			c.Branching.Main = "main"
+		}
+		if c.Branching.Develop == "" {
+			c.Branching.Develop = "develop"
+		}
+		if c.Branching.ReleasePrefix == "" {
+			c.Branching.ReleasePrefix = "release/"
+		}
+		if c.Branching.HotfixPrefix == "" {
+			c.Branching.HotfixPrefix = "hotfix/"
+		}
+		if c.Branching.Prune != nil && c.Branching.Prune.Remote == "" {
+			c.Branching.Prune.Remote = "origin"
+		}
+	}
+}
+
+// BranchDefaults returns branching settings for flow commands: uses branching.* from config
+// when set, otherwise integration branch names and prefixes only (release_cut_from stays empty unless YAML sets it).
+func (c *Config) BranchDefaults() BranchingConfig {
+	out := BranchingConfig{
+		Main:           "main",
+		Develop:        "develop",
+		ReleasePrefix:  "release/",
+		HotfixPrefix:   "hotfix/",
+		ReleaseCutFrom: "",
+	}
+	if c.Branching != nil {
+		if c.Branching.Main != "" {
+			out.Main = c.Branching.Main
+		}
+		if c.Branching.Develop != "" {
+			out.Develop = c.Branching.Develop
+		}
+		if c.Branching.ReleasePrefix != "" {
+			out.ReleasePrefix = c.Branching.ReleasePrefix
+		}
+		if c.Branching.HotfixPrefix != "" {
+			out.HotfixPrefix = c.Branching.HotfixPrefix
+		}
+		out.ReleaseCutFrom = c.Branching.ReleaseCutFrom
+		out.LTSBranches = append(out.LTSBranches, c.Branching.LTSBranches...)
+		if c.Branching.Prune != nil {
+			p := *c.Branching.Prune
+			if p.Remote == "" {
+				p.Remote = "origin"
+			}
+			out.Prune = &p
+		}
+	}
+	return out
 }
 
 // ChangelogFormat returns the changelog entry format string (from Format or FormatFile).

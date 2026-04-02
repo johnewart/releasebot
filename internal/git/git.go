@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"strconv"
 	"strings"
 )
 
@@ -201,4 +202,15 @@ func ParseGitHubOwnerRepo(remoteURL string) (owner, repo string, err error) {
 		return "", "", fmt.Errorf("invalid GitHub URL: %s", remoteURL)
 	}
 	return parts[0], parts[1], nil
+}
+
+// CommitterEpoch returns the committer date of ref as Unix seconds (for age checks).
+func CommitterEpoch(ctx context.Context, repoPath, ref string) (int64, error) {
+	cmd := exec.CommandContext(ctx, "git", "log", "-1", "--format=%ct", ref)
+	cmd.Dir = repoPath
+	out, err := cmd.Output()
+	if err != nil {
+		return 0, fmt.Errorf("git log -1 --format=%%ct %s: %w", ref, err)
+	}
+	return strconv.ParseInt(strings.TrimSpace(string(out)), 10, 64)
 }

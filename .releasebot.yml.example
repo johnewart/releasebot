@@ -63,3 +63,18 @@ github:
 #   remote: origin          # git remote to push to (default: origin)
 #   pypi_package: my-package  # if set, release waits for package==version on PyPI
 #   docker_image: myorg/myimage  # if set, release waits for image:tag on Docker Hub
+
+# Gitflow-like branching: `releasebot flow status|start|finish|prune`
+# branching:
+#   main: main
+#   develop: develop
+#   release_prefix: release/
+#   hotfix_prefix: hotfix/
+#   # Required for `flow start release` when you omit --from (no default in code).
+#   release_cut_from: main
+#   lts_branches:
+#     - release/1.19
+#   prune:
+#     remote: origin
+#     max_age_days: 90
+#     retain_minors: 3

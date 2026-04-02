@@ -12,6 +12,21 @@ Releasebot is a Go CLI that automates release workflows: run justfile recipes, v
    - **GitHub** (if `github.enabled`): merged PRs between the previous tag and `--head` (default `HEAD`). Results are cached in `.releasebot/cache/` by ref range so repeated runs for the same range skip the API.
    - **Otherwise**: git commit log between the same refs.
    - **LLM** (if configured): OpenAI, Ollama, or Anthropic to format the changelog; otherwise a simple template is used.
+6. **Gitflow-like branching** (optional): configure `branching` in `.releasebot.yml` and use `releasebot flow` to inspect drift, start release/hotfix branches, finish hotfixes, and prune stale remote release branches (see below).
+
+## Gitflow-like branching (`releasebot flow`)
+
+Configure integration branch names, prefixes, optional **`release_cut_from`** (required for `flow start release` when you omit `--from`—there is no default in code), **LTS** branch names, and **`branching.prune`** rules. Run `git fetch --prune` (or `flow status --fetch`) so remote tips are current.
+
+| Command | Purpose |
+|--------|---------|
+| `releasebot flow status` | Tabular report: main/develop drift, release/* and hotfix/* vs main and develop; lists issues (e.g. commits not in `main`). `--json`, `--mermaid`. |
+| `releasebot flow start release --from <ref>` | Create `release/M.N` from `ref` (or set `branching.release_cut_from` and omit `--from`). `--version M.N` overrides next minor from tags. `--push` pushes the new branch. |
+| `releasebot flow start hotfix --from <ref>` | Create `hotfix/vM.m.p` from a release branch or tag; `--version` sets the hotfix tag explicitly. `--push`. |
+| `releasebot flow finish hotfix --branch hotfix/vM.m.p` | Merges that hotfix into `release/M.m`, then `main`, then `develop`; `--push` after each merge; `--ff-only` for strict fast-forward merges. |
+| `releasebot flow prune` | Lists remote `release/*` eligible under `max_age_days` and/or `retain_minors`, excluding `lts_branches` and `main`/`develop`. Default is dry-run; **`--apply`** runs `git push <remote> --delete`. |
+
+For `releasebot release`, run from the branch that matches your policy (often `main` or a release branch after merging).
 
 ## Build and Installation
 
@@ -168,6 +183,40 @@ releasebot actions watch --tag v1.0.0
 releasebot actions watch --tag v1.0.0 --timeout 1h --poll-interval 30s
 ```
 
+### GitHub App server (webhooks + OAuth)
+
+Run releasebot as a long-lived HTTP service that verifies GitHub webhooks and can complete **GitHub App user OAuth** (authorization code → user access token). Configure a [GitHub App](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/registering-a-github-app) with a webhook URL pointing at your public `POST` path (default below) and optional callback URL for OAuth.
+
+```bash
+releasebot app serve --addr :8080
+```
+
+Default routes:
+
+| Method | Path | Purpose |
+|--------|------|--------|
+| GET | `/healthz` | Liveness |
+| POST | `/github/webhook` | GitHub webhooks (`X-Hub-Signature-256` verified when a secret is set) |
+| GET | `/oauth/github/login` | Redirect to GitHub to authorize the app (requires OAuth client id + public URL) |
+| GET | `/oauth/github/callback` | Exchange `code` for user token; responds with JSON (`login`, `access_token`, …) |
+
+Flags: `--addr`, `--public-url`, `--webhook-path`, `--oauth-login-path`, `--oauth-callback-path`, `--oauth-scopes`.
+
+**Environment**
+
+| Variable | Purpose |
+|----------|---------|
+| `RELEASEBOT_GITHUB_WEBHOOK_SECRET` | Webhook secret from the app settings; **strongly recommended in production** (if empty, payloads are not verified). |
+| `RELEASEBOT_GITHUB_APP_ID` | Numeric app ID. |
+| `RELEASEBOT_GITHUB_APP_PRIVATE_KEY` or `_PATH` | PEM private key for the app (required with `APP_ID` when using `githubapp.NewInstallationClient`). |
+| `RELEASEBOT_GITHUB_APP_CLIENT_ID` / `RELEASEBOT_GITHUB_APP_CLIENT_SECRET` | From the app’s “OAuth credentials”; used for user-to-server OAuth. |
+| `RELEASEBOT_PUBLIC_URL` | Public origin (e.g. `https://bot.example.com`, no trailing slash). Required for OAuth so `redirect_uri` matches what you register on GitHub. |
+| `RELEASEBOT_GITHUB_OAUTH_SCOPES` | Optional space-separated OAuth scopes. |
+
+The server logs received webhook types (ping, installation, pull_request, push, release, etc.). **Hooking those events into changelog or release automation** can be added incrementally on top of `internal/githubapp`. OAuth CSRF `state` is stored in memory (fine for a single instance; use sticky sessions or a shared store if you scale horizontally). Serve TLS or terminate TLS in front of the service; the OAuth callback returns a user **`access_token` in JSON**—treat that as sensitive data.
+
+Use `githubapp.NewInstallationClient` from Go when you need an API client scoped to an installation (pass installation id from webhook payloads).
+
 ### Environment
 
 - **`OPENAI_API_KEY`** – Required when using OpenAI as the LLM provider. When set and no `llm` config is present, releasebot uses OpenAI with default model `gpt-4o-mini`.
@@ -201,6 +250,11 @@ releasebot actions watch --tag v1.0.0 --timeout 1h --poll-interval 30s
 | `release.remote` | Git remote to push to for the `release` command (default: `origin`) |
 | `release.pypi_package` | PyPI package name; if set, `release` command watches for package availability on PyPI |
 | `release.docker_image` | Docker image name (e.g., `myorg/myimage`); if set, `release` command watches for image availability on Docker Hub |
+| `branching.main` / `branching.develop` | Integration branches (defaults `main` / `develop` once `branching` exists) |
+| `branching.release_prefix` / `branching.hotfix_prefix` | Line branch prefixes (defaults `release/` / `hotfix/`) |
+| `branching.release_cut_from` | Ref for `flow start release` when `--from` is omitted (required then) |
+| `branching.lts_branches` | Protected from `flow prune` |
+| `branching.prune.remote` / `max_age_days` / `retain_minors` | Prune remote, optional staleness and “newest N minors” retention |
 
 See [.releasebot.yml.example](.releasebot.yml.example) for a full example.
 
