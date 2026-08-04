@@ -5,7 +5,7 @@ on:
 
 jobs:
   build:
-    runs-on: [self-hosted, sandbox-eks]
+    runs-on: sandbox-eks
     steps:
       - name: Runner info
         run: |
