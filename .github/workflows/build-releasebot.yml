@@ -1,0 +1,20 @@
+name: Build releasebot
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: [self-hosted, sandbox-eks]
+    steps:
+      - name: Runner info
+        run: |
+          echo "Runner: $RUNNER_NAME ($RUNNER_OS/$RUNNER_ARCH)"
+          uname -a
+          echo "Working dir: $(pwd)"
+          go version || echo "go not preinstalled"
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+      - run: make build
